@@ -18,6 +18,8 @@ interface Props {
   lastRead: EventRow | null
   cacheSyncedAt: number | null
   cacheCount: number
+  /** Why the list did not refresh, if it did not. */
+  cacheError: string | null
   onAct: (request: GuardActionRequest) => void
   onConfirm: (plateNorm: string) => void
 }
@@ -33,7 +35,7 @@ function holdProgress(stageSince: number | null, clearAt: number | null, now: nu
  * A shell around two very different bodies — see SlabStage and CheckStage.
  */
 export function Stage(props: Props) {
-  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount } = props
+  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount, cacheError } = props
 
   if (!event) {
     return (
@@ -44,10 +46,10 @@ export function Stage(props: Props) {
               ? `LAST READ ${formatClock(lastRead.ts)} · ${formatPlate(lastRead.plate_norm ?? '')} · ${RAIL_WORD[lastRead.decision]}`
               : 'NO READS YET'}
           </span>
-          <span>
-            {cacheSyncedAt
-              ? `LIST SYNCED ${formatShortClock(cacheSyncedAt)} · ${cacheCount} VEHICLES`
-              : 'LIST NOT YET SYNCED'}
+          <span style={cacheError ? { color: 'var(--check)' } : undefined}>
+            {cacheError
+              ? `LIST NOT SYNCED · ${cacheError.toUpperCase()}`
+              : `LIST SYNCED ${formatShortClock(cacheSyncedAt)} · ${cacheCount} VEHICLES`}
           </span>
         </div>
 

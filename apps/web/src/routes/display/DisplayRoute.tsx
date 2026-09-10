@@ -43,7 +43,7 @@ export function DisplayRoute() {
 
   const [now, setNow] = useState(() => Date.now())
   const [muted, setMutedState] = useState(isMuted)
-  const [cache, setCache] = useState<CachedList>({ rows: [], syncedAt: null, count: 0 })
+  const [cache, setCache] = useState<CachedList>({ rows: [], syncedAt: null, count: 0, syncError: null })
   const [channelReady, setChannelReady] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [cameraOnline, setCameraOnline] = useState(true)
@@ -73,7 +73,16 @@ export function DisplayRoute() {
   useEffect(() => {
     let alive = true
     void loadVehicles().then((c) => { if (alive) setCache(c) })
-    const sync = () => { void refreshVehicles().then((c) => { if (alive && c) setCache(c) }) }
+    const sync = () => {
+      void refreshVehicles()
+        .then((c) => { if (alive) setCache(c) })
+        .catch((e: unknown) => {
+          // refreshVehicles handles its own failures; this is the last line of defence
+          // so a rejection can never leave the guard looking at a silently empty list.
+          console.warn('[vtrack] vehicle list refresh rejected:', e)
+          if (alive) setCache((prev) => ({ ...prev, syncError: 'the vehicle list refresh failed unexpectedly' }))
+        })
+    }
     sync()
     const id = setInterval(sync, REFRESH_MS)
     return () => { alive = false; clearInterval(id) }
@@ -230,6 +239,7 @@ export function DisplayRoute() {
             <ManualMode
               rows={cache.rows}
               syncedAt={cache.syncedAt}
+              syncError={cache.syncError}
               forced={realtimeDown}
               onClose={() => { searchingRef.current = false; setManualOpen(false) }}
             />
@@ -245,6 +255,7 @@ export function DisplayRoute() {
             lastRead={state.rail[0] ?? null}
             cacheSyncedAt={cache.syncedAt}
             cacheCount={cache.count}
+            cacheError={cache.syncError}
             onAct={onAct}
             onConfirm={onConfirm}
           />

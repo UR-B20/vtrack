@@ -29,6 +29,15 @@ export interface CachedList {
   /** null when the list has never been fetched — the UI says so rather than inventing a time. */
   syncedAt: number | null
   count: number
+  /**
+   * Why the last refresh did not land, or null if it did.
+   *
+   * This exists because an empty approved list is the one failure the guard must never
+   * have to guess at. Manual mode is the fallback that makes demo day safe (brief §2,
+   * position 2); a manual mode that silently finds nothing is worse than one that says
+   * it has no list, because it looks like the vehicle is not approved.
+   */
+  syncError: string | null
 }
 
 export async function loadVehicles(): Promise<CachedList> {
@@ -37,10 +46,15 @@ export async function loadVehicles(): Promise<CachedList> {
       get<VehiclePublic[]>(ROWS_KEY),
       get<CacheMeta>(META_KEY),
     ])
-    return { rows: rows ?? [], syncedAt: meta?.syncedAt ?? null, count: meta?.count ?? rows?.length ?? 0 }
+    return {
+      rows: rows ?? [],
+      syncedAt: meta?.syncedAt ?? null,
+      count: meta?.count ?? rows?.length ?? 0,
+      syncError: null,
+    }
   } catch {
     // A private window or blocked storage must not take the display down.
-    return { rows: [], syncedAt: null, count: 0 }
+    return { rows: [], syncedAt: null, count: 0, syncError: 'this browser is blocking local storage' }
   }
 }
 
@@ -53,17 +67,82 @@ export async function saveVehicles(rows: VehiclePublic[]): Promise<CachedList> {
   } catch {
     /* best effort — an unwritable cache still leaves the in-memory list usable */
   }
-  return { rows, syncedAt: meta.syncedAt, count: meta.count }
+  return { rows, syncedAt: meta.syncedAt, count: meta.count, syncError: null }
 }
 
-/** Pull the whole list from `vehicles_public` and cache it. Returns null if offline. */
-export async function refreshVehicles(): Promise<CachedList | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase
-    .from('vehicles_public')
-    .select('plate_norm, plate_display, owner_name, org_unit, pass_type, status, valid_from, valid_until')
-    .order('plate_norm')
-  if (error || !data) return null
+/**
+ * Pull the whole list from `vehicles_public` and cache it.
+ *
+ * Always returns a usable CachedList: on failure the previously cached rows are kept and
+ * `syncError` says what went wrong, so the screen can tell the guard the list is stale
+ * rather than quietly showing an empty one. The three failure modes are deliberately
+ * distinguished — not configured, refused/unreachable, and reachable but empty — because
+ * they have completely different fixes.
+ */
+/**
+ * Turn a PostgREST or transport error into something a guard at a gate can act on.
+ * "TypeError: Failed to fetch" is true and useless; the cause is nearly always one of
+ * four things, and each has a different fix.
+ */
+function describeError(error: { code?: string; message: string }): string {
+  const m = error.message ?? ''
+  if (/failed to fetch|networkerror|load failed/i.test(m)) {
+    return 'cannot reach Supabase — check VITE_SUPABASE_URL, the network, and that the project is not paused'
+  }
+  if (error.code === 'PGRST301' || /jwt|api key|apikey/i.test(m)) {
+    return 'Supabase rejected the key — check VITE_SUPABASE_ANON_KEY'
+  }
+  if (error.code === '42P01' || /does not exist|could not find the table/i.test(m)) {
+    return 'vehicles_public does not exist — run supabase/migrations/0002_policies.sql'
+  }
+  if (error.code === '42501' || /permission denied/i.test(m)) {
+    return 'permission denied on vehicles_public — re-run supabase/migrations/0002_policies.sql'
+  }
+  return [error.code, m].filter(Boolean).join(' · ') || 'the vehicle list could not be read'
+}
+
+export async function refreshVehicles(): Promise<CachedList> {
+  const cached = await loadVehicles()
+
+  if (!supabase) {
+    return { ...cached, syncError: 'not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in apps/web/.env' }
+  }
+
+  // supabase-js resolves with an `error` for anything PostgREST answered, but THROWS for
+  // a transport failure — DNS, TLS, CORS, a dead project. Both have to be caught here:
+  // an uncaught rejection would leave the cache silently untouched, which is the failure
+  // mode this whole function exists to make visible.
+  let data: unknown[] | null = null
+  let error: { code?: string; message: string } | null = null
+  try {
+    const result = await supabase
+      .from('vehicles_public')
+      .select('plate_norm, plate_display, owner_name, org_unit, pass_type, status, valid_from, valid_until')
+      .order('plate_norm')
+    data = result.data
+    error = result.error
+  } catch (thrown) {
+    const message = thrown instanceof Error ? thrown.message : String(thrown)
+    console.warn('[vtrack] could not reach Supabase to refresh the vehicle list:', message, thrown)
+    return {
+      ...cached,
+      syncError: `cannot reach Supabase (${message}) — check VITE_SUPABASE_URL and that the project is awake`,
+    }
+  }
+
+  if (error) {
+    console.warn('[vtrack] could not refresh the vehicle list:', error.message, error)
+    return { ...cached, syncError: describeError(error) }
+  }
+
+  if (!data || data.length === 0) {
+    // Reachable and permitted, but nothing there. Almost always seed.sql not run, or
+    // run against a different project than the one this build points at.
+    console.warn('[vtrack] vehicles_public returned 0 rows — has supabase/seed.sql been run on this project?')
+    const saved = await saveVehicles([])
+    return { ...saved, syncError: 'the approved list is empty — run supabase/seed.sql' }
+  }
+
   return saveVehicles(data as VehiclePublic[])
 }
 

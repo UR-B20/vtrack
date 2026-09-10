@@ -8,6 +8,8 @@ import type { VehiclePublic } from '../../lib/types'
 interface Props {
   rows: VehiclePublic[]
   syncedAt: number | null
+  /** Why the list is not current, if it is not. */
+  syncError: string | null
   /** True when the channel is down: the panel is then not dismissible. */
   forced: boolean
   onClose: () => void
@@ -32,7 +34,7 @@ function describe(v: VehiclePublic, today: string): string {
  * a dependency. It reaches the guard two ways: forced when Realtime is down, and on
  * demand from the rail's always-available TYPE A PLATE.
  */
-export function ManualMode({ rows, syncedAt, forced, onClose }: Props) {
+export function ManualMode({ rows, syncedAt, syncError, forced, onClose }: Props) {
   const [query, setQuery] = useState('')
   const today = useMemo(() => todayAtGate(), [])
   const results = useMemo(() => searchVehicles(rows, query), [rows, query])
@@ -90,14 +92,20 @@ export function ManualMode({ rows, syncedAt, forced, onClose }: Props) {
       )}
 
       {rows.length === 0 && (
-        <p className="manual__empty">
-          The list has not been cached yet. Connect once while online and it is kept for offline use.
+        <p className="manual__empty" style={{ color: 'var(--check)' }}>
+          {syncError
+            ? `No approved list on this device — ${syncError}. Until it loads, nothing typed here can be checked against the list.`
+            : 'The list has not been cached yet. Connect once while online and it is kept for offline use.'}
         </p>
       )}
 
       <div className="manual__foot">
         DECISIONS MADE HERE ARE LOGGED AS MANUAL ENTRIES ·{' '}
-        {syncedAt ? `THE LIST IS THE COPY CACHED AT ${formatShortClock(syncedAt)}` : 'THE LIST HAS NOT BEEN CACHED YET'}
+        {syncError
+          ? `LIST NOT SYNCED · ${syncError.toUpperCase()}`
+          : syncedAt
+            ? `THE LIST IS THE COPY CACHED AT ${formatShortClock(syncedAt)}`
+            : 'THE LIST HAS NOT BEEN CACHED YET'}
       </div>
     </section>
   )
