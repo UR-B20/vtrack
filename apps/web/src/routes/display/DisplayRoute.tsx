@@ -11,7 +11,7 @@ import { Rail } from './Rail'
 import { OfflineBanner } from './OfflineBanner'
 import { ManualMode } from './ManualMode'
 import { SimulatePanel } from './SimulatePanel'
-import type { GuardActionRequest } from './GuardActions'
+import { storedActor, type GuardActionRequest } from './GuardActions'
 
 /** Drives the hold/clear windows and the "READ n.n s AGO" line. */
 const TICK_MS = 250
@@ -197,7 +197,7 @@ export function DisplayRoute() {
     // Until that exists, record the confirmation and clear the stage — the guard has
     // decided, which is what the hold rule is waiting for.
     void recordAction(
-      { action: 'confirmed', reason: `Confirmed as ${plateNorm}`, actor: 'guard' },
+      { action: 'confirmed', reason: `Confirmed as ${plateNorm}`, actor: storedActor() || null },
       current?.id ?? null,
     )
   }, [recordAction, current?.id])

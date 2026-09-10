@@ -1,4 +1,4 @@
-import { formatDate, passTypeLabel } from '../../lib/format'
+import { formatDate } from '../../lib/format'
 import { formatPlate } from '../../lib/plates'
 import { CheckIcon, CrossIcon } from '../../lib/icons'
 import { REASON_TITLE, VERB, type EventRow, type VehiclePublic } from '../../lib/types'
@@ -44,18 +44,17 @@ export function SlabStage({ event, vehicle, onAct }: Props) {
       </div>
 
       {allow ? (
-        <p className="stage__secondary">
-          {vehicle ? (
-            <>
-              {vehicle.owner_name}
-              {vehicle.org_unit ? ` · ${vehicle.org_unit}` : ''}
-              {` · ${passTypeLabel(vehicle.pass_type)}`}
-              {vehicle.valid_until ? ` · valid to ${formatDate(vehicle.valid_until)}` : ''}
-            </>
-          ) : (
-            'On the approved list'
-          )}
-        </p>
+        // Deliberately just this, not the owner's name and unit.
+        //
+        // The canvas (gate-allowed.png) showed "Tan Wei Ming · HQ Coy · Permanent pass ·
+        // valid to 31 Dec 2026", but the guard does not need any of it to wave a car
+        // through — the system has already decided — and the gate screen is readable from
+        // outside the post. Owner names are personal data (brief §3.10), so a green that
+        // broadcasts them is a privacy cost with no operational benefit.
+        //
+        // The details still exist where they are actually used: the DENY reason lines
+        // below, manual mode, and /admin.
+        <p className="stage__secondary">On the approved list</p>
       ) : (
         <>
           <p className="stage__reason-title">{event.reason ? REASON_TITLE[event.reason] : 'Not allowed'}</p>

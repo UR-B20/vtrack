@@ -95,7 +95,13 @@ Four modules are pure and carry the tests: `plates.ts`, `status.ts`, `displayMac
 
 **CSV import runs on `classify()`, not on a bare checksum.** "Reject rows whose checksum fails" read literally would reject `MID 12345`, which has no checksum. And `repair()` is never called on an import: a silently repaired row would put a plate on the approved list that nobody typed.
 
-**One known canvas discrepancy.** In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB 953B E`, while `gate-allowed.png` shows the same event as the repaired `SNB 9538 E`. We render the best guess (`plate_norm`) everywhere; the raw read appears only in the CHECK stage's "what the camera saw" panel.
+**Two deliberate departures from the canvas.**
+
+`gate-allowed.png` shows the owner's name, unit, pass type and expiry under PROCEED. We render only "On the approved list". The guard needs none of it to wave a car through — the system has already decided — and the gate screen is readable from outside the post, so a green that broadcasts names is a privacy cost (brief §3.10) with no operational benefit. The details still appear where they are acted on: the DENY reason lines, manual mode, and `/admin`.
+
+In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB 953B E`, while `gate-allowed.png` shows the same event as the repaired `SNB 9538 E`. We render the best guess (`plate_norm`) everywhere; the raw read appears only in the CHECK stage's "what the camera saw" panel.
+
+**TURNED AWAY is one tap; LET THROUGH is not.** Turning a vehicle away is the guard agreeing with a decision the system already made, so there is nothing to justify, and putting a form in front of the correct action is how you train people to stop using it. The row is still written to `guard_actions`. Letting a denied vehicle through is the override, and that one asks for a reason and a name (§3.10).
 
 ---
 

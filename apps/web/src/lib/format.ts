@@ -41,12 +41,6 @@ export function formatConfidence(c: number | null | undefined): string {
   return c === null || c === undefined ? '—' : c.toFixed(2)
 }
 
-/** Title-cases a pass type for the allow line: 'permanent' → 'Permanent pass'. */
-export function passTypeLabel(passType: string | null | undefined): string {
-  if (!passType) return ''
-  return `${passType.charAt(0).toUpperCase()}${passType.slice(1)} pass`
-}
-
 /** 'gate1' → 'GATE 1', 'A' → 'A'. Site ids are slugs; the guard reads a label. */
 export function siteLabel(site: string): string {
   return site.toUpperCase().replace(/([A-Z])(\d)/g, '$1 $2')

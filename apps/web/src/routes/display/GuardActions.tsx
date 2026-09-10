@@ -4,7 +4,7 @@ import type { GuardActionKind } from '../../lib/types'
 export interface GuardActionRequest {
   action: GuardActionKind
   reason: string | null
-  actor: string
+  actor: string | null
 }
 
 interface Props {
@@ -17,7 +17,7 @@ interface Props {
 
 const ACTOR_KEY = 'vtrack:actor'
 
-function storedActor(): string {
+export function storedActor(): string {
   try {
     return localStorage.getItem(ACTOR_KEY) ?? ''
   } catch {
@@ -36,23 +36,36 @@ function rememberActor(name: string): void {
 /**
  * LET THROUGH · OVERRIDE and TURNED AWAY (§6.1).
  *
- * Every override is attributed (§3.10) — the guard is asked for a reason and, once per
- * device, for their name, and both go into `guard_actions`. There is no anonymous path:
- * an unattributed override is worth less than no override at all.
+ * The two actions are deliberately asymmetric.
+ *
+ * TURNED AWAY is one tap. It is the guard agreeing with a decision the system already
+ * made, so there is nothing to justify — and putting a form in front of the correct
+ * action is how you train people to stop using it. The row is still written to
+ * `guard_actions` for the audit trail; it just carries no typing.
+ *
+ * LET THROUGH is the override: admitting a vehicle the system said to stop. That is the
+ * one that has to be attributed (§3.10), so it asks for a reason and, once per device,
+ * for a name. There is no anonymous path through it — an unattributed override is worth
+ * less than no override at all.
  */
 export function GuardActions({ onAct, confirmLabel, onConfirm }: Props) {
-  const [prompting, setPrompting] = useState<GuardActionKind | null>(null)
+  const [prompting, setPrompting] = useState(false)
   const [actor, setActor] = useState(storedActor)
   const [reason, setReason] = useState('')
 
-  function submit() {
-    if (!prompting) return
+  function submitOverride() {
     const name = actor.trim()
     if (!name || !reason.trim()) return
     rememberActor(name)
-    onAct({ action: prompting, reason: reason.trim(), actor: name })
-    setPrompting(null)
+    onAct({ action: 'let_through', reason: reason.trim(), actor: name })
+    setPrompting(false)
     setReason('')
+  }
+
+  function turnAway() {
+    // No prompt. If this device already knows who is on shift, the row carries it;
+    // otherwise it is logged without a name rather than blocking on one.
+    onAct({ action: 'turned_away', reason: null, actor: storedActor() || null })
   }
 
   return (
@@ -63,18 +76,18 @@ export function GuardActions({ onAct, confirmLabel, onConfirm }: Props) {
             {confirmLabel}
           </button>
         )}
-        <button type="button" className="action" onClick={() => setPrompting('let_through')}>
+        <button type="button" className="action" onClick={() => setPrompting(true)}>
           LET THROUGH · OVERRIDE
         </button>
-        <button type="button" className="action" onClick={() => setPrompting('turned_away')}>
+        <button type="button" className="action" onClick={turnAway}>
           TURNED AWAY
         </button>
       </div>
 
       {prompting && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Record this decision">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Record this override">
           <div className="modal">
-            <h2>{prompting === 'let_through' ? 'Override — let this vehicle through' : 'Turned away'}</h2>
+            <h2>Override — let this vehicle through</h2>
             <p className="modal__hint">
               This is logged against your name and kept in the audit trail. Say what you checked.
             </p>
@@ -92,15 +105,15 @@ export function GuardActions({ onAct, confirmLabel, onConfirm }: Props) {
               <input
                 id="ga-reason" value={reason} autoFocus={Boolean(actor)}
                 onChange={(e) => setReason(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitOverride() }}
                 placeholder="e.g. Driver has a signed visitor pass"
               />
             </div>
 
             <div className="modal__row">
-              <button type="button" className="btn" onClick={() => setPrompting(null)}>Cancel</button>
+              <button type="button" className="btn" onClick={() => setPrompting(false)}>Cancel</button>
               <button
-                type="button" className="btn btn--primary" onClick={submit}
+                type="button" className="btn btn--primary" onClick={submitOverride}
                 disabled={!actor.trim() || !reason.trim()}
               >
                 Record
