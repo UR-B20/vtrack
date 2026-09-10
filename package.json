@@ -1,0 +1,19 @@
+{
+  "name": "vtrack",
+  "private": true,
+  "version": "0.0.0",
+  "description": "VTrack \u2014 gate vehicle recognition. Monorepo root.",
+  "scripts": {
+    "dev": "pnpm --filter @vtrack/web dev",
+    "build": "pnpm --filter @vtrack/web build",
+    "preview": "pnpm --filter @vtrack/web preview",
+    "test": "pnpm --filter @vtrack/web test",
+    "typecheck": "pnpm --filter @vtrack/web typecheck"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

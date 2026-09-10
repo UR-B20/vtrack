@@ -1,0 +1,33 @@
+/* tokens.css — Command Console, gate variant.
+   CLAUDE.md §3 is the contract. These values are law: no colour may be introduced
+   outside this file, and brass appears on the wordmark and nowhere else. */
+:root {
+  --navy: #0A1A2F; --navy-2: #10243F; --navy-3: #183459; --line: #1E3552; --line-2: #2A4262;
+  --ink-on-navy: #E8E2D6; --muted-on-navy: #97A5B9; --brass: #C9A56B;       /* brass: wordmark only */
+  --paper: #F3EEE4; --paper-2: #FBF8F2; --ink: #15212F; --muted: #5B6B7F; --line-paper: #D9D0BF; --hl: #1F4E8C;
+  --allow-field: #0F6B3E; --allow: #2ECC71;      /* green field + accent */
+  --deny-field:  #8E1B1B; --deny:  #FF6B6B;      /* red   */
+  --check-field: #8A5A00; --check: #F2B632;      /* amber */
+  --offline: #4A5568;
+  --plate-bg: #111418; --plate-border: #F4F4F4;  /* plates render white-on-black, Courier New bold */
+}
+
+/* Type, per §3: system fonts only. */
+:root {
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Courier New", monospace;   /* plates, times and IDs */
+}
+
+/* Display geometry, per §3: 1280×800 tablet landscape. */
+:root {
+  --topbar-h: 56px;
+  --rail-w: 320px;
+  --plate-size: 104px;   /* minimum; the stage scales it up when there is room */
+  --verb-size: 68px;
+}
+
+/* Decision theming. Every status surface reads these three, so a decision is set
+   once (on the stage element) and colour, field and accent follow together. */
+[data-decision='allow'] { --field: var(--allow-field); --accent: var(--allow); }
+[data-decision='deny']  { --field: var(--deny-field);  --accent: var(--deny);  }
+[data-decision='check'] { --field: var(--check-field); --accent: var(--check); }

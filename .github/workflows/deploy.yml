@@ -1,0 +1,74 @@
+name: Deploy web to GitHub Pages
+
+# The PWA is served from Pages because getUserMedia needs a secure context (§7) and
+# every device reaches it over public HTTPS — there is no LAN anywhere in this system.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; let a running one finish so a half-published site is never live.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The pure modules are the decision logic (§1). A red suite must not reach the gate.
+      - run: pnpm test
+
+      - name: Build
+        env:
+          # Pages serves the app under /<repo>/, so the bundle needs that prefix baked in.
+          PAGES_BASE: /${{ github.event.repository.name }}/
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SITE: ${{ vars.VITE_SITE || 'gate1' }}
+          VITE_LANE: ${{ vars.VITE_LANE || 'A' }}
+          VITE_DEVICE_ID: ${{ vars.VITE_DEVICE_ID || 'display-b' }}
+          # Unset until the engine is deployed in M2; the display reads that as
+          # "not deployed yet" rather than as an outage.
+          VITE_ENGINE_URL: ${{ vars.VITE_ENGINE_URL }}
+        run: pnpm build
+
+      - name: SPA fallback for /display, /capture and /admin
+        # Pages serves static files, so a cold load or refresh of a deep link 404s.
+        # Serving index.html as the 404 page hands those paths to the client router.
+        run: cp apps/web/dist/index.html apps/web/dist/404.html
+
+      - name: Do not let Jekyll eat the build
+        run: touch apps/web/dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

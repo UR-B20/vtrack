@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="10" fill="#0A1A2F"/>
+  <rect x="9" y="21" width="46" height="22" rx="4" fill="#111418" stroke="#F4F4F4" stroke-width="2.5"/>
+  <text x="32" y="37" font-family="Courier New, monospace" font-size="15" font-weight="700"
+        fill="#F4F4F4" text-anchor="middle" letter-spacing="1">VT</text>
+</svg>
