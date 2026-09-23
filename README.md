@@ -12,7 +12,7 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 
 **Milestone M1 — first real read.** On top of M0's schema, admin console and gate display: the **VTrack Engine** (`services/engine`, Python 3.12 / FastAPI) and a working **`/capture`** page. Hold a plate to the laptop webcam, tap, and the decision reaches `/display` through Supabase Realtime. Everything runs on `localhost`.
 
-Still to come: cloud deploy, the tablet at the gate and presence gating (M2); heartbeat-driven OFFLINE banner, guard-action audit, crops and retention (M3).
+**M2 — cloud deploy + tablet at the gate — in progress.** Stage A: the engine ships as one always-on container on Render (Singapore), built from [`render.yaml`](render.yaml). Still to come in M2: the tablet capture page with lane ROI and presence gating, then the gate benchmark. M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
 ---
 
@@ -187,6 +187,10 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 
 **Tokens never enter the bundle.** `vite.config.ts` refuses a production build while `VITE_DEVICE_TOKEN` is set, and CI proves it with a canary. Devices pair from their own screen, one storage key per role.
 
+**One plate in position, or no decision.** The frame is the lane ROI around the stop line. A plate cut by its edge belongs to a car not in position; with a calibrated plate width, a plate much bigger or smaller is a car nearer or further than the stop line. Of what is left there must be exactly one plate — two is no decision, with the reason in the response. M1 took the largest plate, which from behind is the car queued nearest the camera.
+
+**`/ready` is Render's, `/health` is the pills'.** `/ready` is latched: 200 once the model is loaded and Supabase has answered once, then for the life of the process. A deploy with a wrong key never goes live, and a Supabase blip never gets a working engine restarted. `/health` is the live truth, status only in public; a paired device's token adds the detail.
+
 **Supabase keys:** a new-style `sb_secret_…` key travels in `apikey` only; a legacy service-role JWT in both headers. A publishable key is refused at startup, and `/health`'s database probe reads a table the public key cannot, so `db: ok` proves the key is the right one.
 
 ---
@@ -197,4 +201,25 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 
 Enable it once under **Settings → Pages → Source: GitHub Actions**.
 
-`.github/workflows/ci.yml` runs on every pull request and push to `main`: web typecheck, tests, build and the device-token canary; engine lint and tests against a Postgres 16 service.
+`.github/workflows/ci.yml` runs on every pull request and push to `main`: web typecheck, tests, build and the device-token canary; engine lint and tests against a Postgres 16 service; and the engine **image**, built and run with no network at half a CPU, which must load its model offline and read a real plate inside 400 ms.
+
+### The engine on Render (M2)
+
+One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/month) in **Singapore**, next to the Supabase project. Measured in that shape: 167 MB, a plate read in ~105 ms (p95 ~175 ms). The model weights are baked into the image, so a cold start never downloads anything.
+
+**Set it up once:**
+
+1. Merge the M2 Stage A pull request (Render deploys `main`).
+2. [render.com](https://render.com) → sign up with GitHub → **New → Blueprint** → pick `UR-B20/vtrack`. Render reads [`render.yaml`](render.yaml).
+3. It asks for three values. Copy them from `services/engine/.env` on your laptop:
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_KEY` — the **secret** key (`sb_secret_…`)
+   - `DEVICE_TOKENS` — the whole `{"cam-a":"…","display-b":"…"}` line
+4. **Apply.** The first build takes a few minutes. In **Logs**, wait for `ready: plate model loaded, database answered`. If it says `not able to decide frames: db_auth`, the key is wrong; `db_unreachable`, the URL is wrong or the project is paused. `DEVICE_TOKENS is empty` means step 3's third value is missing.
+5. Copy the service URL (`https://vtrack-engine-….onrender.com`). In GitHub: **Settings → Secrets and variables → Actions → Variables → New repository variable** `VITE_ENGINE_URL` = that URL.
+6. **Actions → Deploy web to GitHub Pages → Run workflow.** The URL is compiled into the site, so the site must be rebuilt once it is set.
+7. On a tablet **on mobile data** (Wi-Fi off): open `<engine URL>/health` — `"db": "ok"`, `"model_status": "ready"` — then the Pages `/display`: the pill reads **ENGINE · CLOUD OK**.
+
+**How it deploys:** every push to `main` whose CI passes (`autoDeployTrigger: checksPass`). Render starts the new version beside the old one and switches only when `/ready` answers, so for up to a minute both run; the worst case is a duplicate event, never a wrong decision. **Merge engine changes outside gate hours.** A deploy that never becomes ready is cancelled after 15 minutes and the running engine keeps the gate.
+
+**Where to look:** Render → the service → **Logs**. The engine logs readiness changes and nothing else — no plates, no tokens (§5.5).

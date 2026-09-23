@@ -69,7 +69,7 @@ def test_cloud_without_a_token_is_refused():
 
 def test_the_switch_selects_the_adapter(monkeypatch):
     import vtrack_engine.alpr.local_fastalpr as local
-    monkeypatch.setattr(local.LocalFastALPR, "__init__", lambda self: None)
+    monkeypatch.setattr(local.LocalFastALPR, "__init__", lambda self, **kw: None)
     assert type(build_alpr(Settings(_env_file=None))).__name__ == "LocalFastALPR"
     cloud = build_alpr(Settings(_env_file=None, alpr_engine="cloud", platerecognizer_token="t"))
     assert cloud.name == "platerecognizer"

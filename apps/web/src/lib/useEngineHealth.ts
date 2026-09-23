@@ -13,7 +13,7 @@ export function useEngineHealth(url: string | null, everyMs = 10_000): EngineHea
     let alive = true
     const poll = async () => {
       const probe = await probeHealth(url)
-      if (alive) setState(classifyHealth(probe))
+      if (alive) setState(classifyHealth(probe, url))
     }
     void poll()
     const id = setInterval(() => void poll(), everyMs)

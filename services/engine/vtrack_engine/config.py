@@ -17,6 +17,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .decide import Thresholds
 
 ENGINE_DIR = Path(__file__).resolve().parent.parent
+# Said wherever a secret is missing: the engine runs from .env on a laptop and from the
+# host's environment in the container, and either could be the one being set up.
+WHERE_SECRETS_LIVE = "(services/engine/.env on a laptop; Render → Environment in production)"
 
 
 class Settings(BaseSettings):
@@ -30,6 +33,18 @@ class Settings(BaseSettings):
     alpr_engine: Literal["local", "cloud"] = "local"
     platerecognizer_token: str = ""
     region: str = "sg"
+    # Inference threads (local_fastalpr.py). 1 suits Render Starter's half a CPU.
+    alpr_threads: int = 1
+    # Set in the image: the weights are baked in at build, so a missing file is an error,
+    # never a download on the gate's cold start.
+    alpr_offline: bool = False
+
+    # The engine's own `devices` row, touched every heartbeat_s so the running version is
+    # on record and the Supabase free tier never idles into a pause (§3).
+    engine_device_id: str = "engine-1"
+    heartbeat_s: float = 600
+    # Set by Render on every deploy; reported as the running version.
+    render_git_commit: str = ""
 
     # {"cam-a": "<token>", "display-b": "<token>"} — M0 bootstrap; M3 moves to token_hash.
     device_tokens: dict[str, str] = {}
@@ -91,7 +106,7 @@ def service_key_problem(key: str) -> str | None:
         case "secret" | "service_role_jwt":
             return None
         case "missing":
-            return "SUPABASE_SERVICE_KEY is not set in services/engine/.env"
+            return f"SUPABASE_SERVICE_KEY is not set {WHERE_SECRETS_LIVE}"
         case "publishable":
             return ("SUPABASE_SERVICE_KEY is a publishable key (sb_publishable_…). The engine "
                     "needs the SECRET key: Supabase → Settings → API Keys → Secret keys")

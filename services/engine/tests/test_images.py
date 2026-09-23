@@ -53,3 +53,23 @@ def test_rejects_a_truncated_jpeg_header():
 
 def test_rejects_empty():
     assert rejected(b"") == 422
+
+
+def rotated(w, h, orientation):
+    exif = Image.Exif()
+    exif[0x0112] = orientation
+    buf = BytesIO()
+    Image.new("RGB", (w, h), (20, 20, 20)).save(buf, "JPEG", exif=exif.tobytes())
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize(("orientation", "size"), [
+    (1, (640, 360)), (3, (640, 360)), (5, (360, 640)), (6, (360, 640)), (8, (360, 640))])
+def test_the_size_is_the_one_the_model_sees(orientation, size):
+    # cv2.imdecode applies EXIF orientation, and the plate boxes come back in its turned
+    # coordinates, so this must turn too.
+    assert validate_jpeg(rotated(640, 360, orientation)) == size
+
+
+def test_the_minimum_width_applies_after_turning():
+    assert rejected(rotated(640, 300, 6)) == 422

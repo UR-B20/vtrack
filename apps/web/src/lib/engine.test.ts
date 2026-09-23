@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { classifyHealth, engineLabel, engineTone, errorDetail, type Health } from './engine'
+import {
+  classifyHealth, engineDetail, engineLabel, engineSite, engineTone, errorDetail, type Health,
+} from './engine'
 
 const health = (over: Partial<Health> = {}): Health => ({
-  engine: 'local', model: 'yolo + cct', model_status: 'ready', model_error: null,
-  db: 'ok', db_error: null, devices: {}, uptime_s: 5, version: 'm1', ...over,
+  engine: 'local', model: 'yolo + cct', model_status: 'ready', db: 'ok', reason: null,
+  uptime_s: 5, version: 'm2+e47732b', ...over,
 })
+const CLOUD = 'https://vtrack-engine.onrender.com'
 
 describe('classifyHealth', () => {
   it('is OK only on a 200 with a body', () => {
-    expect(classifyHealth({ httpStatus: 200, body: health() })).toEqual({ status: 'ok', engine: 'local' })
+    expect(classifyHealth({ httpStatus: 200, body: health() }, CLOUD)).toEqual(
+      { status: 'ok', site: 'cloud', reader: 'local', version: 'm2+e47732b' })
+  })
+
+  it('explains a public reason code in words', () => {
+    // The public /health carries no error text (brief §3.10), only a code.
+    const h = classifyHealth({ httpStatus: 503, body: health({ db: 'error', reason: 'db_auth' }) }, CLOUD)
+    expect(h).toEqual({ status: 'not_ready', engine: 'local', reason: 'Supabase refused the engine\'s key' })
   })
 
   it('names the database problem first', () => {
@@ -36,12 +46,21 @@ describe('engineLabel / engineTone', () => {
     expect(engineLabel({ status: 'checking' })).toBe('ENGINE · CHECKING')
     expect(engineLabel({ status: 'unreachable', reason: 'x' })).toBe('ENGINE · UNREACHABLE')
     expect(engineLabel({ status: 'not_ready', engine: 'local', reason: 'x' })).toBe('ENGINE · NOT READY')
-    expect(engineLabel({ status: 'ok', engine: 'local' })).toBe('ENGINE · LOCAL OK')
-    expect(engineLabel({ status: 'ok', engine: 'cloud' })).toBe('ENGINE · CLOUD OK')
+    expect(engineLabel({ status: 'ok', site: 'local', reader: 'local', version: null })).toBe('ENGINE · LOCAL OK')
+    expect(engineLabel({ status: 'ok', site: 'cloud', reader: 'local', version: null })).toBe('ENGINE · CLOUD OK')
+  })
+
+  it('names where the engine runs, not which reader it uses', () => {
+    expect(engineSite('http://localhost:8000')).toBe('local')
+    expect(engineSite('http://127.0.0.1:8000')).toBe('local')
+    expect(engineSite(CLOUD)).toBe('cloud')
+    const h = classifyHealth({ httpStatus: 200, body: health() }, CLOUD)
+    expect(engineLabel(h)).toBe('ENGINE · CLOUD OK')
+    expect(engineDetail(h)).toBe('open-source plate model · m2+e47732b')
   })
 
   it('shows green only when OK', () => {
-    expect(engineTone({ status: 'ok', engine: 'local' })).toBe('ok')
+    expect(engineTone({ status: 'ok', site: 'cloud', reader: 'local', version: null })).toBe('ok')
     expect(engineTone({ status: 'unreachable', reason: 'x' })).toBe('offline')
     expect(engineTone({ status: 'unset' })).toBe('')
   })

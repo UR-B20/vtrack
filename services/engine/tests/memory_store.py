@@ -21,6 +21,9 @@ class InMemoryStore:
         self.events: dict[str, dict[str, Any]] = {}
         self.fail_writes: StoreError | None = None
         self.fail_ping: StoreError | None = None
+        self.fail_devices: StoreError | None = None
+        self.fail_touch: StoreError | None = None
+        self.touches = 0
         self.calls: list[str] = []
 
     async def ping(self) -> None:
@@ -29,6 +32,8 @@ class InMemoryStore:
             raise self.fail_ping
 
     async def get_devices(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        if self.fail_devices:
+            raise self.fail_devices
         return {i: self.devices[i] for i in ids if i in self.devices}
 
     async def get_vehicle(self, plate_norm: str) -> VehicleRow | None:
@@ -58,10 +63,16 @@ class InMemoryStore:
         self.events[event_id].update({k: _iso(v) for k, v in fields.items()})
         return dict(self.events[event_id])
 
-    async def touch_device(self, device_id, version, seen_at) -> None:
+    async def touch_device(self, device_id, version, seen_at) -> bool:
+        self.touches += 1
+        if self.fail_touch:
+            raise self.fail_touch
+        if device_id not in self.devices:
+            return False
         self.devices[device_id]["last_seen_at"] = seen_at.isoformat()
         if version:
             self.devices[device_id]["version"] = version
+        return True
 
     async def aclose(self) -> None:
         pass

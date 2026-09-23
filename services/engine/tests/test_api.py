@@ -2,6 +2,7 @@
 store. The ALPR is scripted and the store is in memory; both are tested for real elsewhere
 (test_alpr_real.py, test_db_contract.py, test_db_schema.py)."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 
@@ -12,7 +13,7 @@ from PIL import Image
 from tests.conftest import seeded_vehicles
 from tests.memory_store import InMemoryStore
 from tests.stub_alpr import StubALPR
-from vtrack_engine.alpr.base import ALPRError
+from vtrack_engine.alpr.base import ALPRError, PlateRead
 from vtrack_engine.config import Settings
 from vtrack_engine.db import StoreError
 from vtrack_engine.main import create_app
@@ -31,10 +32,11 @@ def settings(**over):
 
 
 class Rig:
-    def __init__(self, alpr="stub", store=None, **over):
+    def __init__(self, alpr="stub", store=None, background=False, **over):
         self.alpr = StubALPR() if alpr == "stub" else alpr
         self.store = store or InMemoryStore(seeded_vehicles(), DEVICES)
-        self.app = create_app(settings(**over), store=self.store, alpr=self.alpr, load_model=False)
+        self.app = create_app(settings(**over), store=self.store, alpr=self.alpr, load_model=False,
+                              background=background)
         self.client = TestClient(self.app)
 
     def __enter__(self):
@@ -61,9 +63,14 @@ class Rig:
         return list(self.store.events.values())
 
 
-def jpeg(w=640, h=360, fmt="JPEG"):
+def jpeg(w=640, h=360, fmt="JPEG", orientation=None):
     buf = BytesIO()
-    Image.new("RGB", (w, h), (30, 30, 30)).save(buf, fmt)
+    extra = {}
+    if orientation:
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+        extra["exif"] = exif.tobytes()
+    Image.new("RGB", (w, h), (30, 30, 30)).save(buf, fmt, **extra)
     return buf.getvalue()
 
 
@@ -166,6 +173,55 @@ class TestRecogniseDecisions:
         assert body["decision"] is None and rig.events == []
 
 
+# ── /recognise: which plate, in the lane ROI (alpr/base.py select) ──────────────────────
+def plate(text, bbox, conf=0.95):
+    return PlateRead(text=text, confidence=conf, bbox=bbox, engine="stub")
+
+
+class TestPlateSelection:
+    def test_two_plates_in_position_write_nothing_and_say_why(self, rig):
+        rig.alpr.next = [plate("SBA1234G", (40, 150, 200, 200)),
+                         plate("SKN8821R", (300, 100, 600, 180))]
+        body = rig.frame().json()
+        assert body["decision"] is None and body["rejected"] == "multiple_plates"
+        assert rig.events == []
+
+    def test_a_plate_at_the_edge_of_the_roi_is_not_read(self, rig):
+        rig.alpr.next = [plate("SBA1234G", (0, 150, 200, 200))]
+        body = rig.frame().json()
+        assert body["decision"] is None and body["rejected"] == "edge"
+        assert rig.events == []
+
+    def test_the_calibrated_band_reads_the_car_at_the_stop_line(self, rig):
+        # Queued car nearer the camera: a 400 px plate. The car at the guard: 200 px.
+        rig.alpr.next = [plate("SKN8821R", (100, 250, 500, 340)),
+                         plate("SBA1234G", (200, 150, 400, 200))]
+        body = rig.frame(roi='{"plate_w": [0.2, 0.4]}').json()
+        assert (body["plate_norm"], body["decision"]) == ("SBA1234G", "allow")
+
+    def test_without_a_band_the_same_scene_decides_nothing(self, rig):
+        rig.alpr.next = [plate("SKN8821R", (100, 250, 500, 340)),
+                         plate("SBA1234G", (200, 150, 400, 200))]
+        assert rig.frame().json()["rejected"] == "multiple_plates"
+
+    @pytest.mark.parametrize("roi", ["nope", "[1]", '{"plate_w": [0.4, 0.2]}',
+                                     '{"plate_w": [0, 0.2]}', '{"plate_w": "wide"}'])
+    def test_a_malformed_calibration_is_refused_not_ignored(self, rig, roi):
+        r = rig.frame("SBA1234G", roi=roi)
+        assert r.status_code == 422 and "roi" in r.json()["detail"]
+        assert rig.events == []
+
+    def test_other_roi_keys_are_ignored(self, rig):
+        body = rig.frame("SBA1234G", roi='{"x": 0.1, "y": 0.2}').json()
+        assert body["decision"] == "allow"
+
+    def test_boxes_are_measured_against_the_frame_as_the_model_sees_it(self, rig):
+        # A portrait photo stored landscape (EXIF orientation 6): cv2 decodes it turned,
+        # 360 wide × 640 high, and the plate box comes back in those coordinates.
+        rig.alpr.next = [plate("SBA1234G", (60, 400, 300, 460))]
+        assert rig.frame(image=jpeg(orientation=6)).json()["decision"] == "allow"
+
+
 # ── /recognise: dedupe through the real routes ──────────────────────────────────────────
 class TestRefinement:
     def test_repeat_reads_refine_one_event(self, rig):
@@ -260,41 +316,149 @@ class TestHeartbeat:
 
 # ── /health ────────────────────────────────────────────────────────────────────────────
 class TestHealth:
-    def test_ready(self, rig):
+    def test_healthy(self, rig):
         r = rig.client.get("/health")
         body = r.json()
         assert r.status_code == 200
-        assert (body["engine"], body["model"], body["db"]) == ("local", "stub-model", "ok")
-        assert body["devices"]["cam-a"] == "ok · capture · gate1/A"
+        assert (body["engine"], body["model"], body["db"], body["reason"]) == (
+            "local", "stub-model", "ok", None)
         assert body["thresholds"]["conf_decide"] == 0.85
+        assert body["version"].startswith("m2")
 
-    def test_needs_no_token(self, rig):
-        assert rig.client.get("/health").status_code == 200
+    def test_the_public_view_is_status_only(self, rig):
+        # Brief §3.10: the engine is on the public internet; its device list and error text
+        # are not for anyone who finds the URL.
+        body = rig.client.get("/health").json()
+        assert not {"devices", "db_error", "model_error"} & body.keys()
+
+    def test_a_device_token_adds_the_detail(self, rig):
+        body = rig.client.get("/health", headers={"X-Device-Token": CAM}).json()
+        assert body["devices"]["cam-a"] == "ok · capture · gate1/A"
+        assert "db_error" in body and "model_error" in body
+
+    def test_an_unknown_token_gets_the_public_view_not_an_error(self, rig):
+        r = rig.client.get("/health", headers={"X-Device-Token": "x" * 32})
+        assert r.status_code == 200 and "devices" not in r.json()
+
+    def test_a_placeholder_token_never_unlocks_the_detail(self):
+        with Rig(device_tokens={"cam-a": "<random 32 chars>"}) as r:
+            body = r.client.get("/health", headers={"X-Device-Token": "<random 32 chars>"}).json()
+            assert "devices" not in body
 
     def test_model_loading_is_503_with_a_reason(self):
         with Rig(alpr=None) as r:
             res = r.client.get("/health")
-            assert res.status_code == 503 and res.json()["model_status"] == "loading"
+            assert res.status_code == 503
+            assert (res.json()["model_status"], res.json()["reason"]) == ("loading", "model_loading")
 
-    def test_database_failure_is_503_with_a_reason(self, rig):
+    def test_a_rejected_key_is_503_db_auth(self, rig):
         rig.store.fail_ping = StoreError(401, "Supabase rejected the key — check SUPABASE_SERVICE_KEY")
-        res = rig.client.get("/health")
-        assert res.status_code == 503 and "SUPABASE_SERVICE_KEY" in res.json()["db_error"]
+        res = rig.client.get("/health", headers={"X-Device-Token": CAM})
+        assert res.status_code == 503 and res.json()["reason"] == "db_auth"
+        assert "SUPABASE_SERVICE_KEY" in res.json()["db_error"]
+
+    def test_an_unreachable_database_is_503_db_unreachable(self, rig):
+        rig.store.fail_ping = StoreError(504, "Supabase did not answer in time")
+        assert rig.client.get("/health").json()["reason"] == "db_unreachable"
+
+    def test_the_running_version_carries_the_render_commit(self):
+        with Rig(render_git_commit="e47732b0123456789") as r:
+            assert r.client.get("/health").json()["version"] == "m2+e47732b"
+
+
+class TestReady:
+    """/ready is Render's: latched, from memory (main.py docstring)."""
+
+    def test_ready_once_the_model_is_loaded_and_the_database_answered(self, rig):
+        r = rig.client.get("/ready")
+        assert r.status_code == 200 and r.json() == {"ready": True}
+
+    def test_not_ready_while_the_model_loads(self):
+        with Rig(alpr=None) as r:
+            res = r.client.get("/ready")
+            assert res.status_code == 503 and res.json()["reason"] == "model_loading"
+
+    def test_a_wrong_key_never_becomes_ready(self):
+        # The deploy is cancelled and the running engine keeps the gate.
+        s = settings(supabase_url="https://p.supabase.co", supabase_service_key="sb_publishable_x")
+        with TestClient(create_app(s, alpr=StubALPR(), load_model=False, background=False)) as c:
+            res = c.get("/ready")
+            assert res.status_code == 503 and res.json()["reason"] == "db_not_configured"
+
+    def test_a_database_that_never_answered_is_not_ready(self):
+        store = InMemoryStore(seeded_vehicles(), DEVICES)
+        store.fail_devices = StoreError(401, "Supabase rejected the key")
+        store.fail_ping = StoreError(401, "Supabase rejected the key")
+        with Rig(store=store) as r:
+            r.client.get("/health")
+            res = r.client.get("/ready")
+            assert res.status_code == 503 and res.json()["reason"] == "db_auth"
+
+    def test_once_ready_a_database_blip_does_not_unready_it(self, rig):
+        # Restarting the engine cannot fix Supabase; /health still tells the truth.
+        assert rig.client.get("/ready").status_code == 200
+        rig.store.fail_ping = StoreError(504, "Supabase did not answer in time")
+        assert rig.client.get("/health").status_code == 503
+        assert rig.client.get("/ready").status_code == 200
+
+    def test_no_device_tokens_is_not_a_database_that_answered(self):
+        # With no tokens the device lookup makes no request; it must not count as an answer.
+        store = InMemoryStore(seeded_vehicles(), DEVICES)
+        store.fail_ping = StoreError(502, "cannot reach Supabase")
+        with Rig(store=store, device_tokens={}) as r:
+            res = r.client.get("/ready")
+            assert res.status_code == 503 and res.json()["reason"] == "db_unreachable"
+
+    def test_ready_does_no_io(self, rig):
+        rig.store.calls.clear()
+        rig.client.get("/ready")
+        assert rig.store.calls == []
+
+
+class TestEngineHeartbeat:
+    def test_touches_the_engine_row_with_the_running_version(self):
+        from vtrack_engine.main import _engine_heartbeat
+        devices = {**DEVICES, "engine-1": {"id": "engine-1", "role": "engine", "site": None, "lane": None}}
+        with Rig(store=InMemoryStore(seeded_vehicles(), devices), render_git_commit="abc1234") as r:
+            r.client.portal.call(_engine_heartbeat, r.app.state.engine)
+            assert r.store.devices["engine-1"]["version"] == "m2+abc1234"
+
+    def test_a_missing_row_or_a_failure_is_logged_not_raised(self, rig, caplog):
+        from vtrack_engine.main import _engine_heartbeat
+        rig.client.portal.call(_engine_heartbeat, rig.app.state.engine)     # no engine-1 row
+        rig.client.portal.call(_engine_heartbeat, rig.app.state.engine)
+        assert sum("seed.sql" in m for m in caplog.messages) == 1           # warned once
+        rig.store.fail_touch = StoreError(504, "Supabase did not answer in time")
+        rig.client.portal.call(_engine_heartbeat, rig.app.state.engine)
+        assert any("heartbeat failed" in m for m in caplog.messages)
+
+    def test_tests_and_injected_stores_run_no_timers(self, rig):
+        assert rig.store.touches == 0
+
+    def test_with_timers_on_it_probes_and_heartbeats_without_being_asked(self):
+        import time
+        with Rig(background=True) as r:
+            deadline = time.monotonic() + 2
+            while (r.store.touches == 0 or "ping" not in r.store.calls) and time.monotonic() < deadline:
+                r.client.portal.call(asyncio.sleep, 0.01)
+            assert r.store.touches == 1 and "ping" in r.store.calls
 
 
 class TestStartupRefusals:
     def test_a_publishable_key_is_refused_at_startup(self):
         s = settings(supabase_url="https://p.supabase.co", supabase_service_key="sb_publishable_x")
-        app = create_app(s, alpr=StubALPR(), load_model=False)
+        app = create_app(s, alpr=StubALPR(), load_model=False, background=False)
         with TestClient(app) as c:
-            body = c.get("/health").json()
+            body = c.get("/health", headers={"X-Device-Token": CAM}).json()
             assert body["db"] == "error" and "SECRET key" in body["db_error"]
+            assert body["reason"] == "db_not_configured"
 
     def test_a_device_with_no_site_is_refused(self):
         devices = {**DEVICES, "cam-a": {**DEVICES["cam-a"], "site": None}}
         with Rig(store=InMemoryStore(seeded_vehicles(), devices)) as r:
             assert r.frame("SBA1234G").status_code == 403
-            assert "/display" in r.client.get("/health").json()["devices"]["cam-a"]
+            body = r.client.get("/health", headers={"X-Device-Token": DISP}).json()
+            assert "/display" in body["devices"]["cam-a"]
 
     def test_the_example_placeholder_token_is_refused(self):
         with Rig(device_tokens={"cam-a": "<random 32 chars>"}) as r:
