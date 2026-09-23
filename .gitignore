@@ -30,3 +30,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Gate photos for the M2 benchmark: personal data (PDPA), and this repo is public. They stay
+# on the owner's laptop; only aggregate results are committed (CLAUDE.md §11).
+services/engine/tests/plates/

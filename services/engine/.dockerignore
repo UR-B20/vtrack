@@ -1,0 +1,8 @@
+# An allow-list: only what the image needs goes into the build context. Above all, never
+# services/engine/.env (the service key and device tokens) and never tests/plates/ (gate
+# photos, PDPA).
+*
+!pyproject.toml
+!uv.lock
+!vtrack_engine/
+**/__pycache__

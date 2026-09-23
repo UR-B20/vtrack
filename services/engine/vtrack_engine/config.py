@@ -17,6 +17,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from .decide import Thresholds
 
 ENGINE_DIR = Path(__file__).resolve().parent.parent
+# Said wherever a secret is missing: the engine runs from .env on a laptop and from the
+# host's environment in the container, and either could be the one being set up.
+WHERE_SECRETS_LIVE = "(services/engine/.env on a laptop; Render → Environment in production)"
 
 
 class Settings(BaseSettings):
@@ -103,7 +106,7 @@ def service_key_problem(key: str) -> str | None:
         case "secret" | "service_role_jwt":
             return None
         case "missing":
-            return "SUPABASE_SERVICE_KEY is not set in services/engine/.env"
+            return f"SUPABASE_SERVICE_KEY is not set {WHERE_SECRETS_LIVE}"
         case "publishable":
             return ("SUPABASE_SERVICE_KEY is a publishable key (sb_publishable_…). The engine "
                     "needs the SECRET key: Supabase → Settings → API Keys → Secret keys")

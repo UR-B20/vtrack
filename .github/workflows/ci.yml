@@ -95,3 +95,40 @@ jobs:
       # The default run excludes `slow` (the real model, which downloads ~11 MB); it is run
       # before each hand-over and on the laptop. Everything else runs here, with no secrets.
       - run: uv run pytest
+
+  docker:
+    name: docker (image · offline · half a CPU)
+    runs-on: ubuntu-latest
+    # The image Render deploys, built from the same Dockerfile and run with NO network: a
+    # model that is not baked in cannot load, so `model_status: ready` proves it is. Half a
+    # CPU and 512 MB are Render Starter's limits.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/engine
+          load: true
+          tags: vtrack-engine:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Starts offline and answers /health, /ready and /recognise honestly
+        run: |
+          docker run -d --name engine --network none --cpus 0.5 --memory 512m vtrack-engine:ci
+          # --network none: nothing outside can reach it, so the probe asks from inside.
+          docker exec -i engine python - < services/engine/scripts/container_probe.py
+
+      - name: Reads a real plate offline, inside the 400 ms budget
+        run: |
+          docker run --rm --network none --cpus 0.5 --memory 512m \
+            -v "$PWD/services/engine/tests/fixtures:/fx:ro" vtrack-engine:ci \
+            python -m vtrack_engine.selftest /fx/plate_SNB9538E_white_on_black.jpg \
+              --expect SNB9538E --runs 40 | tee selftest.json
+          echo "### Engine image at 0.5 CPU / 512 MB" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"; cat selftest.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Engine log
+        if: always()
+        run: docker logs engine 2>&1 | tail -50 || true

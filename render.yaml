@@ -1,0 +1,29 @@
+# VTrack Engine on Render — a Blueprint (CLAUDE.md §7, decisions log 23 Sep 2026).
+# Render → New → Blueprint → this repo. The three `sync: false` values are asked for once,
+# in Render's dashboard, and never live in git.
+services:
+  - type: web
+    name: vtrack-engine
+    runtime: docker
+    rootDir: services/engine
+    dockerfilePath: ./Dockerfile          # relative to rootDir
+    dockerContext: .
+    region: singapore                     # the Supabase project's region
+    plan: starter                         # 512 MB / 0.5 CPU; measured 167 MB, p95 ~175 ms
+    numInstances: 1                       # the per-lane dedupe locks live in one process
+    branch: main
+    # Deploy only commits whose CI checks passed (ci.yml runs on every push to main).
+    autoDeployTrigger: checksPass
+    # Latched readiness (main.py): a deploy that cannot reach Supabase never takes traffic.
+    healthCheckPath: /ready
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY         # the SECRET key (sb_secret_…), never the publishable one
+        sync: false
+      - key: DEVICE_TOKENS                # {"cam-a":"…","display-b":"…"}, as in services/engine/.env
+        sync: false
+      - key: ALPR_ENGINE
+        value: local
+      - key: ALLOWED_ORIGINS
+        value: https://ur-b20.github.io

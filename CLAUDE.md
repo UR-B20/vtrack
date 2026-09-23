@@ -39,7 +39,7 @@ vtrack/
       db.py                       ← Supabase writes (events, crops, devices)
     tests/                        ← pytest; fixtures in tests/plates/*.jpg
     scripts/benchmark.py          ← runs both adapters over tests/plates, prints read rate / accuracy / p50 / p95
-    Dockerfile  fly.toml          ← always-on container (Fly.io default; Railway equivalent is fine)
+    Dockerfile  .dockerignore     ← always-on container; deployed by render.yaml at the repo root (§11, Engine host)
     pyproject.toml
   supabase/
     migrations/0001_init.sql      ← §4 schema
@@ -211,8 +211,9 @@ class ALPR(Protocol):
 | `POST /recognise` | `X-Device-Token` | multipart `image` (JPEG ≤ 400 KB), `device_id`, `captured_at` (ISO), optional `roi` | `{event_id, plate_norm, plate_display, plate_kind, confidence, checksum_ok, repaired_from, decision, reason, flags, vehicle:{owner_name, org_unit, pass_type, valid_until} \| null, latency_ms, deduped}` |
 | `POST /manual` | `X-Device-Token` | `{device_id, plate_text, actor}` | same shape; `source='manual'` |
 | `POST /heartbeat` | `X-Device-Token` | `{device_id, role, version, stats}` | `204` (upserts `devices.last_seen_at`) |
-| `GET /health` | none | – | `{engine, model, db:'ok'\|'error', uptime_s}` |
-The engine is a **public endpoint**: CORS allows the Pages origin only; every route except `/health` requires a valid `X-Device-Token` (compare against `devices.token_hash`); rate limit 5 req/s per token (429 beyond); reject non-JPEG, images over 400 KB or under 320 px wide; log nothing but the event row. Tokens are rotated from the admin Devices page.
+| `GET /health` | none (a device token adds detail) | – | `{engine, model, model_status, db:'ok'\|'error', reason, thresholds, uptime_s, version}`; with a valid token also `{devices, db_error, model_error}` (§11, 23 Sep 2026) |
+| `GET /ready` | none | – | `200 {ready:true}` once the model is loaded and the DB has answered once, latched; else `503 {ready:false, reason}`. The host's health check |
+The engine is a **public endpoint**: CORS allows the Pages origin only; every route except `/health` and `/ready` requires a valid `X-Device-Token` (compare against `devices.token_hash`); rate limit 5 req/s per token (429 beyond); reject non-JPEG, images over 400 KB or under 320 px wide; log nothing but the event row. Tokens are rotated from the admin Devices page.
  
 ## 6. Web app
  
@@ -232,7 +233,7 @@ The engine is a **public endpoint**: CORS allows the Pages origin only; every ro
 ## 7. Connectivity, deployment & environments
 - **No shared network anywhere.** Tablet at A, screen at B and the admin each use their own mobile data. All traffic is public HTTPS.
 - **Web app** → GitHub Pages (HTTPS is required for `getUserMedia`). Base path configured in `vite.config.ts`.
-- **Engine** → one always-on container. Fly.io default: `fly launch` in `services/engine`, secrets via `fly secrets set …`, health check on `/health`, `min_machines_running = 1` (never scale to zero — the gate runs day and night). Railway is an acceptable substitute. Free tiers that sleep are not.
+- **Engine** → one always-on container. Fly.io default: `fly launch` in `services/engine`, secrets via `fly secrets set …`, health check on `/health`, `min_machines_running = 1` (never scale to zero — the gate runs day and night). Railway is an acceptable substitute. Free tiers that sleep are not. **Amended 23 Sep 2026 — see §11 (Engine host):** Render Starter in Singapore via `render.yaml`, health check on `/ready`.
 - **Dev loop** stays on the laptop: `pnpm dev` on `http://localhost:5173`, engine on `localhost:8000`, laptop webcam. `localhost` is a secure context, so no HTTPS is needed locally.
 - Mobile data changes addresses constantly → never allow-list IPs; auth is token-only (§5.5).
 - `.env.example`
@@ -245,7 +246,7 @@ DEVICE_TOKENS={"cam-a":"<random 32 chars>","display-b":"<…>"}   # M0 bootstrap
 CONF_DECIDE=0.85  CONF_CHECK=0.60  DEDUPE_S=15  REPAIR_MAX_SUBS=2  REGION=sg  RATE_LIMIT_PER_S=5
 ALLOWED_ORIGINS=http://localhost:5173,https://<user>.github.io
 # apps/web/.env
-VITE_SUPABASE_URL=  VITE_SUPABASE_ANON_KEY=  VITE_ENGINE_URL=http://localhost:8000   # prod: https://vtrack-engine.fly.dev
+VITE_SUPABASE_URL=  VITE_SUPABASE_ANON_KEY=  VITE_ENGINE_URL=http://localhost:8000   # prod: https://vtrack-engine….onrender.com
 VITE_SITE=gate1  VITE_LANE=A  VITE_DEVICE_ID=display-b  VITE_DEVICE_TOKEN=
 ```
  
@@ -281,4 +282,10 @@ Barrier control (relay/GPIO), face or driver identification, plate spoofing dete
 | List owner | Ranee, in `/admin`; CSV import; FormSG visitor flow post-POC |
 | Plate repair (23 Sep 2026) | An `invalid` read is also offered to `repair()`: every §5.1 repair example (`SNB953BE`, `SG2O17C`, `SBS988OU`) is `invalid`, so §5.2 read literally would never repair them. Exactly one checksum-valid candidate that is on the list → ALLOW, marked REPAIRED; not on the list → CHECK. `STRICT_SPEC_REPAIR` in `decide.py` restores the literal §5.2 |
 | Dropped check letter (23 Sep 2026) | A foreign-shaped read not on the list whose one Singapore completion is on the list (`SNB9538` → `SNB9538E`) → CHECK `ambiguous`, never DENY and never ALLOW. Found when the real model dropped a check letter at 0.997 confidence |
+| Engine host (23 Sep 2026) | **Render Starter, Singapore** (Supabase's region), from `render.yaml`: Docker, one instance, deploys `main` after CI passes, health check `/ready`. Measured in its shape (0.5 CPU / 512 MB): 167 MB, read p50 ~105 ms / p95 ~175 ms, inference on one thread. Replaces §2's `fly.toml` and §7's Fly.io steps |
+| Screen at B (23 Sep 2026) | A tablet, not a phone (§8 M2): the display runs as designed at 1280×800 |
+| Benchmark photos (23 Sep 2026) | Stay on the owner's laptop, never in git: the repo is public and plates are personal data (PDPA). `tests/plates/` is git-ignored; only aggregate results are committed. The M2 benchmark runs the local model only — no gate photo goes to Plate Recognizer; the `ALPR_ENGINE` switch stays built and tested in CI |
+| Motorcycles (23 Sep 2026) | Singapore motorcycles carry a front number sticker, so a camera facing arriving vehicles can read them; "bike, front sticker" is its own benchmark category |
+| Plate selection (23 Sep 2026) | The engine reads a plate only if it is fully inside the frame (the lane ROI) and, when `/capture` sends a calibrated `roi.plate_w` band, the width a plate has at the stop line. Exactly one such plate is read; two is no decision (`rejected: multiple_plates`). Replaces "largest plate wins", which from behind picks the car queued nearest the camera |
+| `/health` in public (23 Sep 2026) | Status only (brief §3.10) plus a coarse `reason`; a valid device token adds device list and error text. `/ready`, latched, is what the host routes by, so a deploy with a wrong key never takes the gate and a Supabase blip never restarts a working engine |
  

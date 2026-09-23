@@ -401,6 +401,14 @@ class TestReady:
         assert rig.client.get("/health").status_code == 503
         assert rig.client.get("/ready").status_code == 200
 
+    def test_no_device_tokens_is_not_a_database_that_answered(self):
+        # With no tokens the device lookup makes no request; it must not count as an answer.
+        store = InMemoryStore(seeded_vehicles(), DEVICES)
+        store.fail_ping = StoreError(502, "cannot reach Supabase")
+        with Rig(store=store, device_tokens={}) as r:
+            res = r.client.get("/ready")
+            assert res.status_code == 503 and res.json()["reason"] == "db_unreachable"
+
     def test_ready_does_no_io(self, rig):
         rig.store.calls.clear()
         rig.client.get("/ready")

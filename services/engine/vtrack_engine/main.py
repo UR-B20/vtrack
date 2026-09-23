@@ -48,7 +48,7 @@ from slowapi.errors import RateLimitExceeded
 from .alpr import ALPR, ALPRError, build_alpr, select
 from .auth import AuthError, Device, DeviceRegistry, check_claim
 from .clock import now_utc, today_at_gate
-from .config import Settings, load_settings, service_key_problem
+from .config import WHERE_SECRETS_LIVE, Settings, load_settings, service_key_problem
 from .db import EventStore, StoreError, SupabaseStore
 from .decide import Interpretation, decide, interpret
 from .dedupe import Insert, merge, window_start
@@ -129,13 +129,16 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         if state.store is None and not injected_store:
             problem = service_key_problem(settings.supabase_service_key)
             if problem is None and not settings.supabase_url:
-                problem = "SUPABASE_URL is not set in services/engine/.env"
+                problem = f"SUPABASE_URL is not set {WHERE_SECRETS_LIVE}"
             if problem:
                 state.db_error, state.db_reason = problem, "db_not_configured"
                 log.error("database not configured: %s", problem)
             else:
                 state.store = SupabaseStore(settings.supabase_url, settings.supabase_service_key)
-        await _ensure_devices(state)
+        if not settings.device_tokens:
+            log.error("DEVICE_TOKENS is empty %s — no device can use this engine",
+                      WHERE_SECRETS_LIVE)
+        await _check_db(state)
         tasks: list[asyncio.Task] = []
         if state.alpr is not None:
             state.model_status = "ready"
@@ -470,8 +473,9 @@ async def _ensure_devices(state: EngineState) -> None:
     except StoreError as exc:
         _db_failed(state, exc)
         return
+    # Not _db_ok: with no device tokens configured this makes no request at all, and only
+    # a real answer from the database may count towards /ready.
     state.registry.load(rows)
-    _db_ok(state)
 
 
 async def _probe_db(state: EngineState, every_s: float = 5.0) -> None:
@@ -480,6 +484,13 @@ async def _probe_db(state: EngineState, every_s: float = 5.0) -> None:
     if time.monotonic() - state.db_checked_at < every_s and state.db_checked_at:
         return
     state.db_checked_at = time.monotonic()
+    await _check_db(state)
+
+
+async def _check_db(state: EngineState) -> None:
+    """One real round trip. The only thing that marks the database as having answered."""
+    if state.store is None:
+        return
     try:
         await state.store.ping()
     except StoreError as exc:
