@@ -77,8 +77,10 @@ def response_from_row(row: dict[str, Any], *, vehicle: VehicleRow | None, conf_d
     }
 
 
-def no_plate_response(latency_ms: int) -> dict[str, Any]:
-    """Nothing readable in the frame. No event is written: an empty tap must not put amber
-    on the guard's screen."""
+def no_plate_response(latency_ms: int, rejected: str | None = None) -> dict[str, Any]:
+    """Nothing readable in position in the frame. No event is written: an empty tap must not
+    put amber on the guard's screen. `rejected` says why plates that WERE seen were not
+    read — "edge", "size" or "multiple_plates" (alpr/base.py select) — so /capture can say
+    so while the ROI is being set up."""
     return {"event_id": None, "decision": None, "reason": None, "plate_norm": None,
-            "latency_ms": latency_ms, "deduped": False}
+            "rejected": rejected, "latency_ms": latency_ms, "deduped": False}

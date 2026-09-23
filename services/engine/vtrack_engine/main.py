@@ -36,15 +36,16 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 
-from .alpr import ALPR, ALPRError, build_alpr, pick
+from .alpr import ALPR, ALPRError, build_alpr, select
 from .auth import AuthError, Device, DeviceRegistry, check_claim
 from .clock import now_utc, today_at_gate
 from .config import Settings, load_settings, service_key_problem
 from .db import EventStore, StoreError, SupabaseStore
-from .decide import Interpretation, as_truncated_read, decide, interpret
+from .decide import Interpretation, decide, interpret
 from .dedupe import Insert, merge, window_start
 from .events import new_event_row, no_plate_response, response_from_row
 from .images import MAX_BYTES, ImageRejected, validate_jpeg
+from .pipeline import band_from_roi, conclude, lookups
 from .plates import CIVILIAN, checksum_letter, classify
 
 VERSION = "m1"
@@ -198,8 +199,12 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         store = require_store(state)
 
         data = await image.read(MAX_BYTES + 1)
-        validate_jpeg(data)
+        width, height = validate_jpeg(data)
         _check_frame_age(captured_at, settings.max_frame_age_s)
+        try:
+            band = band_from_roi(roi)
+        except ValueError as exc:
+            raise ApiError(422, str(exc)) from exc
 
         if state.alpr is None or state.model_status != "ready":
             raise ApiError(503, state.model_error or "the plate model is still loading")
@@ -208,19 +213,18 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         except ALPRError as exc:
             raise ApiError(502, str(exc)) from exc
 
-        chosen = pick(reads)
+        selection = select(reads, width, height, band)
+        chosen = selection.read
         if chosen is None:
-            return JSONResponse(no_plate_response(_ms(t0)))
+            return JSONResponse(no_plate_response(_ms(t0), selection.rejected))
 
+        # The same pure steps the benchmark runs (pipeline.py); only the lookups are I/O.
         th = settings.thresholds
         interp = interpret(chosen.text, chosen.confidence, th)
-        vehicle = await store.get_vehicle(interp.plate_norm) if interp.early is None else None
-        # A foreign-shaped read may be an approved SG plate that lost its check letter:
-        # if its completion is on the list, ask rather than deny (decide.py).
-        if (vehicle is None and interp.early is None and interp.completion
-                and await store.get_vehicle(interp.completion) is not None):
-            interp = as_truncated_read(interp)
-        verdict = decide(interp, vehicle, today_at_gate(), th)
+        plates = lookups(interp)
+        found = await asyncio.gather(*(store.get_vehicle(p) for p in plates))
+        outcome = conclude(interp, dict(zip(plates, found, strict=True)), today_at_gate(), th)
+        interp, verdict, vehicle = outcome.interp, outcome.verdict, outcome.vehicle
 
         async with state.lane_lock(device.site, device.lane):
             now = now_utc()

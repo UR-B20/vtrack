@@ -6,7 +6,7 @@ from statistics import mean
 import pytest
 
 from tests.conftest import TODAY, seeded_vehicles
-from vtrack_engine.alpr.base import ALPRError, PlateRead, pick
+from vtrack_engine.alpr.base import ALPRError, PlateBand, PlateRead, Selection, select
 from vtrack_engine.alpr.local_fastalpr import LocalFastALPR, decode_bgr, ocr_confidence
 from vtrack_engine.decide import Thresholds, decide, interpret
 
@@ -113,18 +113,56 @@ def read(text, bbox):
     return PlateRead(text=text, confidence=0.9, bbox=bbox, engine="t")
 
 
-class TestPick:
-    def test_the_nearest_plate_wins(self):
-        near, far = read("SBA1234G", (0, 0, 400, 100)), read("SNB9538E", (0, 0, 100, 25))
-        assert pick([far, near]) is near
+W, H = 640, 360      # the frame: /capture's lane ROI crop
 
-    def test_an_unreadable_nearest_plate_is_no_plate_not_the_one_behind_it(self):
-        # Falling back would decide the car at the guard on the plate of the car behind it.
-        near, far = read("", (0, 0, 400, 100)), read("SNB9538E", (0, 0, 100, 25))
-        assert pick([far, near]) is None
+
+class TestSelect:
+    def test_one_plate_in_position_is_read(self):
+        plate = read("SBA1234G", (200, 150, 400, 200))
+        assert select([plate], W, H) == Selection(plate)
 
     def test_nothing_is_nothing(self):
-        assert pick([]) is None
+        assert select([], W, H) == Selection(None)
+
+    def test_a_plate_cut_by_the_edge_is_a_car_not_in_position(self):
+        # Touching (or inside the 1 % margin of) any edge: left, top, right, bottom.
+        for bbox in [(0, 150, 200, 200), (200, 2, 400, 60), (500, 150, 639, 200),
+                     (200, 300, 400, 358)]:
+            assert select([read("SBA1234G", bbox)], W, H) == Selection(None, "edge"), bbox
+
+    def test_the_car_in_position_is_read_past_a_plate_at_the_edge(self):
+        at_gate = read("SBA1234G", (200, 150, 400, 200))
+        cut = read("SNB9538E", (0, 250, 180, 300))
+        assert select([cut, at_gate], W, H).read is at_gate
+
+    def test_two_plates_in_position_decide_nothing(self):
+        # From behind, the car queued nearest the camera has the LARGER plate: M1's
+        # "largest wins" would decide the car at the guard on its number plate.
+        a = read("SBA1234G", (40, 150, 200, 200))
+        b = read("SNB9538E", (300, 100, 600, 180))
+        assert select([a, b], W, H) == Selection(None, "multiple_plates")
+
+    def test_an_unreadable_plate_is_still_a_plate(self):
+        # One readable and one unreadable plate in position is two plates, not one.
+        a = read("", (40, 150, 200, 200))
+        b = read("SNB9538E", (300, 100, 600, 180))
+        assert select([a, b], W, H) == Selection(None, "multiple_plates")
+
+    def test_a_lone_unreadable_plate_is_no_plate(self):
+        assert select([read("", (200, 150, 400, 200))], W, H) == Selection(None)
+
+    def test_the_band_ignores_a_plate_nearer_or_further_than_the_stop_line(self):
+        band = PlateBand(0.20, 0.40)                                # 128–256 px of 640
+        at_gate = read("SBA1234G", (200, 150, 400, 200))            # 200 px
+        queued_nearer = read("SNB9538E", (100, 250, 500, 340))      # 400 px
+        assert select([at_gate, queued_nearer], W, H, band).read is at_gate
+        assert select([queued_nearer], W, H, band) == Selection(None, "size")
+        assert select([read("SNB9538E", (300, 60, 360, 80))], W, H, band) == Selection(None, "size")
+
+    def test_the_band_edges_are_inclusive(self):
+        band = PlateBand(0.25, 0.50)
+        assert select([read("SBA1234G", (100, 150, 260, 200))], W, H, band).read    # 0.25
+        assert select([read("SBA1234G", (100, 150, 420, 200))], W, H, band).read    # 0.50
 
 
 def test_fast_alpr_installs_and_imports():

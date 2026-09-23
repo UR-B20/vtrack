@@ -12,9 +12,11 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import TODAY, seeded_vehicles
-from vtrack_engine.alpr.base import pick
+from vtrack_engine.alpr.base import select
 from vtrack_engine.alpr.local_fastalpr import LocalFastALPR
-from vtrack_engine.decide import Thresholds, decide, interpret
+from vtrack_engine.decide import Thresholds, interpret
+from vtrack_engine.images import validate_jpeg
+from vtrack_engine.pipeline import conclude, lookups
 from vtrack_engine.plates import normalise
 
 pytestmark = pytest.mark.slow
@@ -29,15 +31,19 @@ def alpr():
 
 
 def pipeline(alpr, name):
+    """/recognise's own steps (pipeline.py), with the seeded list standing in for Supabase."""
     th = Thresholds()
+    data = (FIX / name).read_bytes()
+    width, height = validate_jpeg(data)
     start = time.perf_counter()
-    chosen = pick(alpr.recognise((FIX / name).read_bytes()))
+    chosen = select(alpr.recognise(data), width, height).read
     ms = (time.perf_counter() - start) * 1000
     if chosen is None:
         return None, None, ms
     interp = interpret(chosen.text, chosen.confidence, th)
-    vehicle = seeded_vehicles().get(interp.plate_norm) if interp.early is None else None
-    return interp, decide(interp, vehicle, TODAY, th), ms
+    rows = {p: seeded_vehicles().get(p) for p in lookups(interp)}
+    outcome = conclude(interp, rows, TODAY, th)
+    return outcome.interp, outcome.verdict, ms
 
 
 def test_a_clear_plate_reads_and_allows(alpr):

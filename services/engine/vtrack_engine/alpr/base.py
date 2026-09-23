@@ -5,6 +5,7 @@ Both adapters answer the same question, so the gate benchmark in M2 can swap one
 other with no code change (ALPR_ENGINE=local|cloud).
 """
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -35,14 +36,60 @@ def area(read: PlateRead) -> int:
     return max(0, x2 - x1) * max(0, y2 - y1)
 
 
-def pick(reads: list[PlateRead]) -> PlateRead | None:
-    """The plate the decision is about: the LARGEST in the frame, since the vehicle stopped
-    at the guard is the nearest one to the camera.
+@dataclass(frozen=True)
+class PlateBand:
+    """The width a plate has at the stop line, as fractions of the frame's width. /capture
+    calibrates it at the gate (SET PLATE SIZE) and sends it in §5.5's optional `roi` field."""
+    min_w: float
+    max_w: float
 
-    If that plate is unreadable, the answer is "no plate" — never a smaller, readable one
-    further back. Falling back would decide the car at the guard on the number plate of the
-    car queued behind it."""
+    def admits(self, read: PlateRead, frame_w: int) -> bool:
+        x1, _, x2, _ = read.bbox
+        return self.min_w <= (x2 - x1) / frame_w <= self.max_w
+
+
+@dataclass(frozen=True)
+class Selection:
+    read: PlateRead | None            # the one plate the decision is about, if any
+    # Why plates were seen but none was chosen: "edge" | "size" | "multiple_plates".
+    rejected: str | None = None
+
+
+EDGE_MARGIN = 0.01      # of the frame's width / height, and never under 2 px
+
+
+def inside(read: PlateRead, frame_w: int, frame_h: int) -> bool:
+    mx, my = max(2, round(frame_w * EDGE_MARGIN)), max(2, round(frame_h * EDGE_MARGIN))
+    x1, y1, x2, y2 = read.bbox
+    return x1 >= mx and y1 >= my and x2 <= frame_w - mx and y2 <= frame_h - my
+
+
+def select(reads: list[PlateRead], frame_w: int, frame_h: int,
+           band: PlateBand | None = None) -> Selection:
+    """The plate the decision is about, or none.
+
+    The frame is the lane ROI that /capture crops around the stop line, so:
+      • a plate cut by the frame's edge belongs to a car that is not in position — ignored;
+      • with a calibrated band, a plate much bigger or smaller than one at the stop line
+        belongs to a car nearer or further than it (the car queued behind) — ignored;
+      • of what is left there must be EXACTLY ONE plate. Two plates in position is a scene
+        the engine cannot resolve, so it decides nothing and says why, rather than guess
+        whose green it is.
+    If that one plate is unreadable the answer is "no plate" — never a different, readable
+    plate: that would decide the car at the guard on the number plate of another car.
+
+    This replaces M1's "largest plate wins", which is only right when the camera faces the
+    front of arriving vehicles; from behind, the car queued nearest the camera is the
+    larger one."""
     if not reads:
-        return None
-    nearest = max(reads, key=area)
-    return nearest if is_readable(nearest.text) else None
+        return Selection(None)
+    placed = [r for r in reads if inside(r, frame_w, frame_h)]
+    if not placed:
+        return Selection(None, "edge")
+    sized = [r for r in placed if band is None or band.admits(r, frame_w)]
+    if not sized:
+        return Selection(None, "size")
+    if len(sized) > 1:
+        return Selection(None, "multiple_plates")
+    only = sized[0]
+    return Selection(only if is_readable(only.text) else None)

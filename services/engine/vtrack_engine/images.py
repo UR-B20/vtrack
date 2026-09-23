@@ -15,6 +15,8 @@ from PIL import Image, UnidentifiedImageError
 MAX_BYTES = 400 * 1024
 MIN_WIDTH = 320
 JPEG_MAGIC = b"\xff\xd8\xff"
+EXIF_ORIENTATION = 0x0112
+TRANSPOSED = {5, 6, 7, 8}       # EXIF orientations that swap width and height
 
 
 class ImageRejected(Exception):
@@ -25,7 +27,14 @@ class ImageRejected(Exception):
 
 
 def validate_jpeg(data: bytes) -> tuple[int, int]:
-    """Return (width, height), or raise ImageRejected with the HTTP status to answer."""
+    """Return (width, height) as the model sees the frame, or raise ImageRejected with the
+    HTTP status to answer.
+
+    "As the model sees it": cv2.imdecode applies the EXIF orientation, so a portrait photo
+    stored landscape with orientation 6 is decoded 90° turned — and plate boxes come back in
+    those turned coordinates. The size that plate selection measures them against must be
+    the turned one too. (Canvas frames from /capture carry no EXIF; a photo taken with the
+    tablet's own camera app does.)"""
     if not data:
         raise ImageRejected(422, "no image was sent")
     if len(data) > MAX_BYTES:
@@ -38,6 +47,8 @@ def validate_jpeg(data: bytes) -> tuple[int, int]:
             if im.format != "JPEG":
                 raise ImageRejected(415, "image must be a JPEG")
             width, height = im.size
+            if im.getexif().get(EXIF_ORIENTATION) in TRANSPOSED:
+                width, height = height, width
     except (UnidentifiedImageError, OSError) as exc:
         raise ImageRejected(422, "image could not be read as a JPEG") from exc
     if width < MIN_WIDTH:

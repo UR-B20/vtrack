@@ -12,7 +12,7 @@ from PIL import Image
 from tests.conftest import seeded_vehicles
 from tests.memory_store import InMemoryStore
 from tests.stub_alpr import StubALPR
-from vtrack_engine.alpr.base import ALPRError
+from vtrack_engine.alpr.base import ALPRError, PlateRead
 from vtrack_engine.config import Settings
 from vtrack_engine.db import StoreError
 from vtrack_engine.main import create_app
@@ -61,9 +61,14 @@ class Rig:
         return list(self.store.events.values())
 
 
-def jpeg(w=640, h=360, fmt="JPEG"):
+def jpeg(w=640, h=360, fmt="JPEG", orientation=None):
     buf = BytesIO()
-    Image.new("RGB", (w, h), (30, 30, 30)).save(buf, fmt)
+    extra = {}
+    if orientation:
+        exif = Image.Exif()
+        exif[0x0112] = orientation
+        extra["exif"] = exif.tobytes()
+    Image.new("RGB", (w, h), (30, 30, 30)).save(buf, fmt, **extra)
     return buf.getvalue()
 
 
@@ -164,6 +169,55 @@ class TestRecogniseDecisions:
     def test_an_empty_ocr_text_is_no_plate(self, rig):
         body = rig.frame("", 0.99).json()
         assert body["decision"] is None and rig.events == []
+
+
+# ── /recognise: which plate, in the lane ROI (alpr/base.py select) ──────────────────────
+def plate(text, bbox, conf=0.95):
+    return PlateRead(text=text, confidence=conf, bbox=bbox, engine="stub")
+
+
+class TestPlateSelection:
+    def test_two_plates_in_position_write_nothing_and_say_why(self, rig):
+        rig.alpr.next = [plate("SBA1234G", (40, 150, 200, 200)),
+                         plate("SKN8821R", (300, 100, 600, 180))]
+        body = rig.frame().json()
+        assert body["decision"] is None and body["rejected"] == "multiple_plates"
+        assert rig.events == []
+
+    def test_a_plate_at_the_edge_of_the_roi_is_not_read(self, rig):
+        rig.alpr.next = [plate("SBA1234G", (0, 150, 200, 200))]
+        body = rig.frame().json()
+        assert body["decision"] is None and body["rejected"] == "edge"
+        assert rig.events == []
+
+    def test_the_calibrated_band_reads_the_car_at_the_stop_line(self, rig):
+        # Queued car nearer the camera: a 400 px plate. The car at the guard: 200 px.
+        rig.alpr.next = [plate("SKN8821R", (100, 250, 500, 340)),
+                         plate("SBA1234G", (200, 150, 400, 200))]
+        body = rig.frame(roi='{"plate_w": [0.2, 0.4]}').json()
+        assert (body["plate_norm"], body["decision"]) == ("SBA1234G", "allow")
+
+    def test_without_a_band_the_same_scene_decides_nothing(self, rig):
+        rig.alpr.next = [plate("SKN8821R", (100, 250, 500, 340)),
+                         plate("SBA1234G", (200, 150, 400, 200))]
+        assert rig.frame().json()["rejected"] == "multiple_plates"
+
+    @pytest.mark.parametrize("roi", ["nope", "[1]", '{"plate_w": [0.4, 0.2]}',
+                                     '{"plate_w": [0, 0.2]}', '{"plate_w": "wide"}'])
+    def test_a_malformed_calibration_is_refused_not_ignored(self, rig, roi):
+        r = rig.frame("SBA1234G", roi=roi)
+        assert r.status_code == 422 and "roi" in r.json()["detail"]
+        assert rig.events == []
+
+    def test_other_roi_keys_are_ignored(self, rig):
+        body = rig.frame("SBA1234G", roi='{"x": 0.1, "y": 0.2}').json()
+        assert body["decision"] == "allow"
+
+    def test_boxes_are_measured_against_the_frame_as_the_model_sees_it(self, rig):
+        # A portrait photo stored landscape (EXIF orientation 6): cv2 decodes it turned,
+        # 360 wide × 640 high, and the plate box comes back in those coordinates.
+        rig.alpr.next = [plate("SBA1234G", (60, 400, 300, 460))]
+        assert rig.frame(image=jpeg(orientation=6)).json()["decision"] == "allow"
 
 
 # ── /recognise: dedupe through the real routes ──────────────────────────────────────────
