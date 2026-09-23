@@ -32,4 +32,11 @@ describe('readView', () => {
     const v = readView({ ...base, decision: null, reason: null, plate_norm: null, event_id: null })
     expect(v).toMatchObject({ tone: 'none', word: 'NO PLATE IN VIEW', plate: null })
   })
+
+  it('says why plates that were seen were not read, still never amber', () => {
+    const none = { ...base, decision: null, reason: null, plate_norm: null, event_id: null }
+    expect(readView({ ...none, rejected: 'multiple_plates' })).toMatchObject({ tone: 'none', word: 'TWO PLATES IN THE LANE BOX' })
+    expect(readView({ ...none, rejected: 'edge' }).word).toBe('PLATE AT THE EDGE')
+    expect(readView({ ...none, rejected: 'size' }).word).toBe('PLATE NOT AT THE STOP LINE')
+  })
 })

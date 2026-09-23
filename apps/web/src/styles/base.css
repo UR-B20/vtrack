@@ -520,38 +520,141 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
 .signin__card input:focus { border-color: var(--hl); }
 .error-note { color: var(--deny); font-size: 14px; margin: 0; }
 
-/* ── /capture, point A (§6.2) — tokens only, as everywhere ───────────────────────── */
-.capture {
-  display: grid; grid-template-rows: var(--topbar-h) 1fr auto;
-  height: 100%; background: var(--navy); color: var(--ink-on-navy);
+/* ── /capture, point A (§6.2, docs/screens/capture.png) — tokens only, as everywhere ── */
+.cap {
+  display: grid; grid-template-rows: var(--topbar-h) minmax(0, 1fr) auto; grid-template-columns: 1fr;
+  height: 100%; background: var(--navy); color: var(--ink-on-navy); user-select: none; -webkit-user-select: none;
+  padding-bottom: 64px; /* the lock bar */
 }
-.capture__top {
-  display: flex; align-items: center; gap: 18px; padding: 0 20px;
-  border-bottom: 1px solid var(--line);
-}
-.capture__unpair { padding: 8px 4px; font-size: 12.5px; color: var(--muted-on-navy); }
-.capture__stage { position: relative; min-height: 0; overflow: hidden; background: var(--plate-bg); }
+.cap__top { display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.cap__unpair { padding: 8px 4px; font-size: 12.5px; color: var(--muted-on-navy); }
+.cap__stage { position: relative; min-height: 0; overflow: hidden; background: var(--plate-bg); touch-action: none; }
 /* The whole frame, letterboxed and NOT mirrored: the plate must read on screen exactly as the
-   engine receives it, and lib/frame.ts maps boxes onto exactly this geometry. */
-.capture__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
-.capture__notice {
+   engine receives it, and lib/frame.ts maps the ROI and boxes onto exactly this geometry. */
+.cap__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.cap__notice {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   padding: 32px; text-align: center; color: var(--muted-on-navy); font-size: 18px; line-height: 1.6;
 }
-.capture__box {
+.cap__chips { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; flex-wrap: wrap; gap: 10px; pointer-events: none; }
+.chip {
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.14em; padding: 9px 16px;
+  border-radius: 999px; background: var(--navy); color: var(--ink-on-navy); border: 1px solid var(--line-2);
+}
+.chip--on { border-color: var(--allow); }
+.chip--warn { border-color: var(--check); color: var(--check); }
+
+.cap__roi {
+  position: absolute; border: 2px dashed var(--muted-on-navy); border-radius: 8px;
+}
+.cap__roi--editing { border-style: solid; border-color: var(--ink-on-navy); background: rgba(232,226,214,0.06); cursor: move; }
+.cap__roi--small.cap__roi--editing { border-color: var(--check); }
+.cap__roi-label {
+  position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 12px;
+  letter-spacing: 0.14em; color: var(--muted-on-navy); pointer-events: none;
+}
+.cap__roi--small .cap__roi-label { color: var(--check); }
+.cap__roi-handle {
+  position: absolute; right: -14px; bottom: -14px; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--ink-on-navy); border: 3px solid var(--navy); cursor: nwse-resize; touch-action: none;
+}
+.cap__box {
   position: absolute; pointer-events: none;
   border: 3px solid currentColor; border-radius: 6px; box-shadow: 0 0 0 2px var(--navy);
 }
-.capture__bar {
-  display: flex; align-items: center; gap: 18px; min-height: 84px; padding: 16px 20px;
-  border-top: 1px solid var(--line);
+.cap__boxlabel {
+  position: absolute; transform: translate(-50%, calc(-100% - 8px)); white-space: nowrap; pointer-events: none;
+  padding: 5px 12px; border-radius: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 15px;
+  letter-spacing: 0.06em; color: var(--navy);
 }
-.capture__tap { font-size: 18px; padding: 16px 34px; }
-.capture__hint, .capture__last {
-  font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.12em; color: var(--muted-on-navy);
+.bg-allow { background: var(--allow); }
+.bg-deny  { background: var(--deny); }
+.bg-check { background: var(--check); }
+.bg-none  { background: var(--muted-on-navy); }
+.cap__float {
+  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100% - 40px);
+  display: flex; flex-direction: column; gap: 6px; text-align: center; padding: 12px 18px;
+  border: 2px solid currentColor; border-radius: 10px; background: var(--navy);
+  font-family: var(--font-mono); font-size: 16px; letter-spacing: 0.1em;
 }
-.capture__last { display: inline-flex; align-items: center; gap: 10px; }
-.capture__error { display: inline-flex; align-items: center; gap: 12px; max-width: 60%; color: var(--deny); font-size: 15px; }
+.cap__float-detail { color: var(--ink-on-navy); font-family: var(--font-ui); font-size: 15px; letter-spacing: 0; line-height: 1.45; }
+
+.cap__controls { display: flex; flex-direction: column; gap: 16px; padding: 24px 28px; }
+.lastread {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 24px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--navy-2);
+}
+.lastread > div:first-child { display: flex; flex-direction: column; gap: 10px; }
+.lastread__label { font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.16em; color: var(--muted-on-navy); }
+.lastread__plate { font-size: 28px; }
+.lastread__none { font-family: var(--font-mono); font-size: 15px; letter-spacing: 0.1em; color: var(--muted-on-navy); }
+.lastread__right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.lastread__word { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 16px; letter-spacing: 0.12em; }
+.lastread__meta { font-size: 15px; color: var(--muted-on-navy); letter-spacing: 0.08em; }
+
+.modeswitch { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden; }
+.modeswitch__opt {
+  padding: 22px 0; font-family: var(--font-mono); font-weight: 700; font-size: 17px; letter-spacing: 0.18em;
+  background: var(--navy); color: var(--muted-on-navy); border: 0; cursor: pointer;
+}
+.modeswitch__opt--on { background: var(--ink-on-navy); color: var(--navy); }
+.capnow {
+  display: flex; align-items: center; justify-content: center; gap: 14px; padding: 28px 16px;
+  border: 2px solid var(--line-2); border-radius: 14px; background: var(--navy); color: var(--ink-on-navy);
+  font-family: var(--font-mono); font-weight: 700; font-size: 16px; letter-spacing: 0.16em; cursor: pointer;
+}
+.capnow:disabled { color: var(--muted-on-navy); cursor: not-allowed; }
+.capnow__icon { flex: none; }
+.cap__edit { align-self: center; }
+.cap__error { margin: 0; display: flex; align-items: center; gap: 12px; color: var(--deny); font-size: 15px; line-height: 1.45; }
+
+/* The lock (ScreenLock.tsx): a shield over everything, and a bar held for 2 s to unlock. */
+.lockshield { position: fixed; inset: 0; z-index: 40; }
+.lockbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41; height: 64px; overflow: hidden;
+  display: flex; align-items: center; gap: 14px; padding: 0 28px; border: 0; border-top: 1px solid var(--line);
+  background: var(--navy); color: var(--muted-on-navy); font-family: var(--font-mono); font-size: 14px;
+  letter-spacing: 0.16em; text-align: left; touch-action: none; cursor: pointer;
+}
+.lockbar > * { position: relative; }
+.lockbar__fill {
+  position: absolute; inset: 0; width: 0; background: var(--navy-3); transition-property: width; transition-timing-function: linear;
+}
+.lockbar--holding .lockbar__fill { width: 100%; }
+.lockbar--holding { color: var(--ink-on-navy); }
+.lockbar--open { justify-content: space-between; cursor: default; }
+.lockbar__now { color: var(--ink-on-navy); font-family: var(--font-mono); letter-spacing: 0.16em; }
+
+/* ?dev=1 setup panel (DevPanel.tsx) */
+.capdev {
+  position: absolute; top: 64px; right: 12px; z-index: 5; width: min(420px, calc(100% - 24px));
+  display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line-2); border-radius: 10px;
+  background: var(--navy); font-size: 13px; color: var(--ink-on-navy);
+}
+.capdev--closed { width: auto; padding: 8px 14px; font-family: var(--font-mono); letter-spacing: 0.14em; cursor: pointer; }
+.capdev__head { display: flex; justify-content: space-between; align-items: center; letter-spacing: 0.14em; }
+.capdev__line { color: var(--muted-on-navy); font-size: 12px; letter-spacing: 0.06em; }
+.capdev__meter, .capdev__slider { display: grid; grid-template-columns: 96px 1fr 116px; align-items: center; gap: 8px; font-size: 12px; }
+.capdev__bar { position: relative; height: 10px; background: var(--navy-3); border-radius: 5px; overflow: hidden; }
+.capdev__fill { position: absolute; inset: 0 auto 0 0; background: var(--muted-on-navy); }
+.capdev__fill--over { background: var(--check); }
+.capdev__mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink-on-navy); }
+.capdev__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.capdev__buttons .btn { padding: 8px 12px; font-size: 12px; }
+.capdev__check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; color: var(--muted-on-navy); }
+
+/* A tablet mounted in landscape: the viewfinder on the left, the controls on the right. */
+@media (orientation: landscape) and (min-width: 900px) {
+  .cap { grid-template-columns: minmax(0, 1fr) 420px; grid-template-rows: var(--topbar-h) minmax(0, 1fr); }
+  .cap__top { grid-column: 1 / -1; }
+  .cap__controls { overflow-y: auto; }
+}
+
+.pair__typed { border-top: 1px solid var(--line); padding-top: 14px; }
+.pair__typed summary { cursor: pointer; font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.13em; color: var(--muted-on-navy); }
+.pair__typed form { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.pair__scan { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.pair__video { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--plate-bg); }
 .pair__label { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.13em; color: var(--muted-on-navy); margin-bottom: -10px; }
 
 /* Decision tone: always beside a word and an icon, never the only channel (§6.1). */
@@ -563,13 +666,6 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
 .readchip { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.08em; }
 .readchip__icon { width: 18px; height: 18px; flex: none; }
 .readchip__word { letter-spacing: 0.12em; }
-.readchip--floating {
-  position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
-  flex-wrap: wrap; justify-content: center; max-width: calc(100% - 40px);
-  padding: 12px 18px; border: 2px solid currentColor; border-radius: 10px;
-  background: var(--navy); font-size: 18px;
-}
-.readchip__detail { color: var(--ink-on-navy); font-family: var(--font-ui); font-size: 15px; letter-spacing: 0; }
 
 /* ── narrower screens: the gate tablet is 1280×800, but admin gets used on a laptop ── */
 @media (max-width: 1100px) {

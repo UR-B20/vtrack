@@ -12,7 +12,12 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 
 **Milestone M1 — first real read.** On top of M0's schema, admin console and gate display: the **VTrack Engine** (`services/engine`, Python 3.12 / FastAPI) and a working **`/capture`** page. Hold a plate to the laptop webcam, tap, and the decision reaches `/display` through Supabase Realtime. Everything runs on `localhost`.
 
-**M2 — cloud deploy + tablet at the gate — in progress.** Stage A: the engine ships as one always-on container on Render (Singapore), built from [`render.yaml`](render.yaml). Still to come in M2: the tablet capture page with lane ROI and presence gating, then the gate benchmark. M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
+**M2 — cloud deploy + tablet at the gate — in progress.**
+- **Stage A (live):** the engine runs as one always-on container on Render (Singapore), built from [`render.yaml`](render.yaml).
+- **Stage B:** `/capture` for the tablet at A, per `docs/screens/capture.png` — a lane ROI, presence gating that sends frames only while a vehicle is in the lane, QR pairing and a screen lock.
+- **Still to come in M2:** the gate benchmark.
+
+M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
 ---
 
@@ -34,7 +39,7 @@ pnpm typecheck
 |---|---|
 | `/display` | Point B, the gate screen. Add `?dev=1` for the Simulate panel. |
 | `/admin` | Vehicles CRUD, CSV import/export. Needs sign-in and the admin role. |
-| `/capture` | Point A, the camera. Pair once, then **READ PLATE** (or Space). Needs the engine running. |
+| `/capture` | Point A, the camera. Pair once. Locked until the bottom bar is held for 2 s. **AUTO** sends frames while a vehicle is in the lane; **TAP** sends one per **CAPTURE NOW** (or Space). Needs the engine running. |
 
 ---
 
@@ -106,9 +111,9 @@ uv run vtrack-engine        # 127.0.0.1:8000 · one worker · no access log. Fir
 
 Open **http://127.0.0.1:8000/health**. Ready means `"db": "ok"`, `"model_status": "ready"`, and every device `ok`. Anything else is spelled out in the body — e.g. a publishable key where the secret key should be, a placeholder token, or a device with no row in `devices`.
 
-**Pair the camera:** open `http://localhost:5173/capture`, paste the `cam-a` token. It is checked against the engine before it is kept, and stored only in that browser.
+**Pair the camera:** open `http://localhost:5173/capture` and scan the code from `uv run vtrack-pair-qr cam-a`, or type the `cam-a` token. It is checked against the engine before it is kept, and stored only in that browser.
 
-**The M1 test:** `/capture` and `/display` in **two side-by-side windows** (not tabs — a hidden tab throttles the display's clock). Hold a printed plate to the webcam and press **READ PLATE**; the result is on both screens within about a second.
+**The M1 test:** `/capture` and `/display` in **two side-by-side windows** (not tabs — a hidden tab throttles the display's clock). Unlock (hold the bottom bar 2 s), switch to **TAP**, hold a printed plate inside the dashed lane box and press **CAPTURE NOW**; the result is on both screens within about a second.
 
 | On a laptop | Why |
 |---|---|
@@ -140,7 +145,9 @@ apps/web/src/
   routes/display/displayMachine.ts   the pure state machine
   routes/display/…   TopBar · Stage → SlabStage | CheckStage · Rail · ManualMode · OfflineBanner
   routes/admin/…     VehiclesTable · VehicleDrawer · csv.ts
-  routes/capture/…   CaptureRoute · PairDevice · CameraView · readView.ts
+  routes/capture/…   CaptureRoute · PairDevice · CameraView (+ parts, ScreenLock, DevPanel, grab, useCamera) · readView.ts
+  lib/presence.ts    when the camera sends a frame (pure; presence.test.ts)
+  lib/roi.ts         the lane ROI · lib/captureStore.ts what the tablet keeps · lib/updates.ts idle-only updates
   lib/engine.ts · device.ts · frame.ts   the engine client, per-role pairing, JPEG fit + box mapping
 supabase/            migrations, seed, admin_role, dev/
 services/engine/vtrack_engine/
@@ -191,6 +198,15 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 
 **`/ready` is Render's, `/health` is the pills'.** `/ready` is latched: 200 once the model is loaded and Supabase has answered once, then for the life of the process. A deploy with a wrong key never goes live, and a Supabase blip never gets a working engine restarted. `/health` is the live truth, status only in public; a paired device's token adds the detail.
 
+**The camera sends only while a vehicle is in the lane** (`lib/presence.ts`). It compares a 64×36 thumbnail of the lane ROI with a picture of the lane empty. Each thumbnail is divided by its own brightness, so auto-exposure and headlights don't count, and presence is a *fraction* of changed cells, so a motorcycle does.
+- Per vehicle: a burst of up to 2 frames/s for 3 s, then one every 2 s, stopping at a confident answer or 12 frames.
+- A queued car that pulls in behind another gets its own frames, even though the lane never emptied.
+- Floodlights that make the lane look occupied for a minute with no plate are taken as the new empty lane.
+
+**No buffered retry.** The brief asked capture to buffer frames through a mobile-data drop. With presence gating, the next frame two seconds later is the retry, and it is fresher. A failed send doesn't use up the vehicle's 12.
+
+**A new version never reloads a screen mid-vehicle.** The service worker waits (`lib/updates.ts`) until the lane is empty (`/capture`) or the display is in standby.
+
 **Supabase keys:** a new-style `sb_secret_…` key travels in `apikey` only; a legacy service-role JWT in both headers. A publishable key is refused at startup, and `/health`'s database probe reads a table the public key cannot, so `db: ok` proves the key is the right one.
 
 ---
@@ -223,3 +239,33 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 **How it deploys:** every push to `main` whose CI passes (`autoDeployTrigger: checksPass`). Render starts the new version beside the old one and switches only when `/ready` answers, so for up to a minute both run; the worst case is a duplicate event, never a wrong decision. **Merge engine changes outside gate hours.** A deploy that never becomes ready is cancelled after 15 minutes and the running engine keeps the gate.
 
 **Where to look:** Render → the service → **Logs**. The engine logs readiness changes and nothing else — no plates, no tokens (§5.5).
+
+### The tablets at the gate (M2)
+
+**Before you go:** if you ever ran `supabase/dev/simulate_policy.sql`, run `supabase/dev/simulate_policy_down.sql` now.
+
+**Tablet A (the camera)**
+1. Turn **auto-rotate off**. Mount the tablet facing the vehicles as they arrive: queued cars then sit further back and look smaller, and motorcycles show their front number sticker.
+2. In Chrome, open **https://ur-b20.github.io/vtrack/capture?dev=1** on mobile data. `?dev=1` shows the setup panel; drop it once set up.
+3. **Pair it.**
+   - On the laptop, in `services/engine`, run `uv run vtrack-pair-qr cam-a`. It prints a QR code in the terminal.
+   - On the tablet, tap **SCAN PAIRING CODE** and point it at the laptop screen.
+   - Close the terminal afterwards: the code is the tablet's key. (If the scanner won't work, **TYPE THE TOKEN INSTEAD** does the same.)
+4. **Unlock:** hold the bottom bar for 2 s. It locks itself again after 30 s untouched.
+5. **EDIT LANE ROI:**
+   - Drag the dashed box over the spot where a stopped vehicle's plate will be, and use the corner handle to size it.
+   - Keep it at least 640 px wide; the label warns below that.
+   - Tap **DONE — SAVE THE LANE ROI**.
+6. **Let it calibrate:** keep the lane empty until the chip changes from **CALIBRATING** to **LANE EMPTY**. **LANE IS EMPTY** in the dev panel redoes this at any time.
+7. **Set the plate size:** when the first car stops and shows a green box, tap **SET PLATE SIZE**. Plates much bigger or smaller than that (a car nearer or further than the stop line) are then ignored.
+8. **Watch a few vehicles**, including a motorcycle.
+   - The chip shows **VEHICLE IN LANE · 3/12**: frames sent for that vehicle, never more than 12.
+   - If a vehicle is missed, lower **PRESENT AT**. If shadows or headlights count as vehicles, raise it.
+9. **Pin the screen** so the page can't be left: Android **Settings → Security → App pinning** (the name varies by model) → on. Then, from Recents, tap Chrome's icon → **Pin**.
+
+**Tablet B (the guard's screen):** open **https://ur-b20.github.io/vtrack/display**. The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
+
+**Benchmark photos (Stage C).** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):
+- turn off cloud backup of Downloads (Samsung Cloud / Google Photos);
+- move them to the laptop by USB, into a folder **outside** the repository and outside OneDrive;
+- delete them from the tablet, including its Trash.

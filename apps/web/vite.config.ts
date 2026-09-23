@@ -29,7 +29,9 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       react(),
       VitePWA({
-        registerType: 'autoUpdate',
+        // A new version waits until the screen is idle (src/lib/updates.ts): never mid-vehicle.
+        registerType: 'prompt',
+        injectRegister: false,
         // The display and capture nodes are installed to a tablet home screen (§6.1, §6.2).
         includeAssets: ['favicon.svg'],
         manifest: {
@@ -39,7 +41,8 @@ export default defineConfig(({ command, mode }) => {
           theme_color: '#0A1A2F',
           background_color: '#0A1A2F',
           display: 'fullscreen',
-          orientation: 'landscape',
+          // No orientation here: /display is landscape and /capture portrait, one app. Each
+          // route locks its own once it is fullscreen.
           start_url: base,
           scope: base,
           icons: [
