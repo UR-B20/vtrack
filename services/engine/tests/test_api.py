@@ -139,6 +139,22 @@ class TestRecogniseDecisions:
     def test_verify_between_the_thresholds(self, rig):
         assert rig.frame("SBA1234G", 0.7).json()["flags"] == {"verify": True}
 
+    def test_a_dropped_check_letter_on_an_approved_plate_is_check_not_deny(self, rig):
+        # The real model's own misread of a clear SNB 9538 E, through a webcam.
+        body = rig.frame("SNB9538", 0.997).json()
+        assert (body["decision"], body["reason"]) == ("check", "ambiguous")
+        assert (body["plate_norm"], body["repaired_from"]) == ("SNB9538E", "SNB9538")
+        assert body["vehicle"] is None
+
+    def test_a_clean_read_then_refines_that_check_to_allow(self, rig):
+        first = rig.frame("SNB9538", 0.997).json()
+        second = rig.frame("SNB9538E", 0.95).json()
+        assert second["event_id"] == first["event_id"] and second["decision"] == "allow"
+
+    def test_a_truly_foreign_unlisted_plate_is_still_deny(self, rig):
+        body = rig.frame("JHA1234", 0.95).json()
+        assert (body["decision"], body["reason"]) == ("deny", "not_on_list")
+
     def test_no_plate_writes_no_event(self, rig):
         rig.alpr.next = []
         body = rig.frame().json()
@@ -230,6 +246,12 @@ class TestHeartbeat:
         assert r.status_code == 204
         assert rig.store.devices["cam-a"]["version"] == "m1"
         assert rig.store.devices["cam-a"]["last_seen_at"]
+
+    def test_a_stated_role_must_match_the_token(self, rig):
+        # How /capture validates a pairing: a display token cannot pair as a camera.
+        r = rig.client.post("/heartbeat", headers={"X-Device-Token": DISP},
+                            json={"device_id": "display-b", "role": "capture"})
+        assert r.status_code == 403 and "display device" in r.json()["detail"]
 
     def test_cannot_speak_for_another_device(self, rig):
         r = rig.client.post("/heartbeat", headers={"X-Device-Token": CAM}, json={"device_id": "display-b"})

@@ -6,7 +6,15 @@ import pytest
 
 from tests.conftest import TODAY
 from vtrack_engine import decide as decide_mod
-from vtrack_engine.decide import Thresholds, VehicleRow, decide, interpret, is_readable
+from vtrack_engine.decide import (
+    Thresholds,
+    VehicleRow,
+    as_truncated_read,
+    decide,
+    interpret,
+    is_readable,
+    sg_completion,
+)
 
 DEFAULT_TH = Thresholds()
 
@@ -154,3 +162,39 @@ class TestReadable:
     @pytest.mark.parametrize(("text", "ok"), [("", False), ("   ", False), ("-·-", False), (None, False), ("S", True)])
     def test_is_readable(self, text, ok):
         assert is_readable(text) is ok
+
+
+class TestDroppedCheckLetter:
+    """The real model read a clear SNB 9538 E through a webcam as "SNB9538" at 0.997. Without
+    this guard that is a confident DENY — no VERIFY — for an approved car."""
+
+    @pytest.mark.parametrize(("read", "completed"), [
+        ("SNB9538", "SNB9538E"), ("SBA1234", "SBA1234G"), ("E23", "E23H"), ("JHA1234", None),
+    ])
+    def test_completion(self, read, completed):
+        got = sg_completion(read)
+        if completed is None:
+            assert got is not None and got.startswith("JHA1234")   # completable, just not listed
+        else:
+            assert got == completed
+
+    @pytest.mark.parametrize("read", ["SNB9538E", "MID12345", "SNB953BE", ""])
+    def test_only_a_letterless_plate_is_completed(self, read):
+        assert sg_completion(read) is None
+
+    def test_interpret_offers_a_completion_for_foreign_reads_only(self):
+        assert interpret("SNB9538", 0.997, DEFAULT_TH).completion == "SNB9538E"
+        assert interpret("SNB9538E", 0.997, DEFAULT_TH).completion is None
+
+    def test_an_approved_completion_is_check_never_deny_and_never_allow(self, vehicles):
+        interp = interpret("SNB9538", 0.997, DEFAULT_TH)
+        assert vehicles.get(interp.plate_norm) is None and interp.completion in vehicles
+        interp = as_truncated_read(interp)
+        v = decide(interp, None, TODAY, DEFAULT_TH)
+        assert (v.decision, v.reason) == ("check", "ambiguous")
+        assert (interp.plate_norm, interp.repaired_from, interp.checksum_ok) == ("SNB9538E", "SNB9538", False)
+
+    def test_without_the_guard_it_would_have_been_a_confident_deny(self, vehicles):
+        interp = interpret("SNB9538", 0.997, DEFAULT_TH)
+        v = decide(interp, vehicles.get(interp.plate_norm), TODAY, DEFAULT_TH)
+        assert (v.decision, v.verify) == ("deny", False)      # what the route now prevents

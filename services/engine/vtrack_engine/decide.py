@@ -30,13 +30,25 @@ One deliberate reading of the spec, flagged rather than buried:
   that is not on the list is CHECK (never DENY), and the display marks every repaired
   result REPAIRED. `mid` and `foreign` are never repaired. STRICT_SPEC_REPAIR below restores
   the literal reading.
+
+And one guard the spec does not have, which only ever turns a DENY into a CHECK:
+  The real model, reading a clear SNB 9538 E through a webcam, returned "SNB9538" at 0.997 —
+  it dropped the check letter and was sure of every character it did emit, so the
+  weakest-character rule cannot catch it. Without its check letter that read has the shape
+  §5.1 calls `foreign`, foreign plates are never repaired, and it is not on the list: a
+  confident DENY, no VERIFY, for an approved car. But a Singapore check letter is fully
+  determined by prefix and number, so such a read has exactly one possible completion. When
+  the read itself is not on the list and that completion IS, the answer is CHECK
+  ("ambiguous"), with the completed plate as the best guess. Never a green: a genuinely
+  foreign plate (Sabah plates also start with S) must not be allowed on an SG row.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Literal
 
-from .plates import classify, normalise, repair
+from .plates import checksum_letter, classify, normalise, repair
 
 Decision = Literal["allow", "deny", "check"]
 Reason = Literal[
@@ -74,6 +86,8 @@ class Interpretation:
     repaired_from: str | None    # normalised raw read, when a repair was made
     confidence: float            # rounded to 3 places, clamped to [0, 1]
     early: Verdict | None        # a CHECK decided before any lookup is needed
+    # A foreign-shaped read that is exactly a Singapore plate minus its check letter, completed.
+    completion: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +108,27 @@ def is_readable(text: str | None) -> bool:
     """False for an empty OCR result. The caller writes no event for it: an empty tap must
     not put amber on the guard's screen."""
     return bool(text and normalise(text))
+
+
+_SG_WITHOUT_CHECK = re.compile(r"^([A-Z]{1,3})(\d{1,4})$")
+
+
+def sg_completion(plate_norm: str) -> str | None:
+    """'SNB9538' → 'SNB9538E': the one Singapore plate this read could be if the camera lost
+    its check letter. None when the read has a trailing letter or another shape."""
+    m = _SG_WITHOUT_CHECK.match(plate_norm)
+    return f"{m[1]}{m[2]}{checksum_letter(m[1], m[2])}" if m else None
+
+
+def as_truncated_read(interp: Interpretation) -> Interpretation:
+    """The read is not on the list but its completion is: we may be looking at an approved car
+    whose check letter the camera lost. Ask — show the completed plate as the best guess and
+    the read as the raw — never allow on it."""
+    assert interp.completion is not None
+    return replace(
+        interp, plate_norm=interp.completion, plate_kind="civilian", checksum_ok=False,
+        repaired_from=interp.plate_norm, early=Verdict("check", "ambiguous"), completion=None,
+    )
 
 
 def interpret(text: str, confidence: float, th: Thresholds) -> Interpretation:
@@ -128,6 +163,7 @@ def interpret(text: str, confidence: float, th: Thresholds) -> Interpretation:
         repaired_from=repaired_from,
         confidence=confidence,
         early=early,
+        completion=sg_completion(canon) if kind == "foreign" else None,
     )
 
 

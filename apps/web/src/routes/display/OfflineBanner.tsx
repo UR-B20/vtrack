@@ -1,6 +1,6 @@
 import { formatShortClock } from '../../lib/format'
 import { OfflineIcon } from '../../lib/icons'
-import { ENGINE_URL } from '../../lib/supabase'
+import { engineLabel, type EngineHealth } from '../../lib/engine'
 
 interface Props {
   cameraOffline: boolean
@@ -8,6 +8,7 @@ interface Props {
   /** Local ms since the camera was last seen, or null when heartbeats do not exist yet. */
   cameraSince: number | null
   cacheSyncedAt: number | null
+  engine: EngineHealth
   now: number
 }
 
@@ -18,7 +19,7 @@ interface Props {
  * underneath". A result the guard is acting on must not vanish because a heartbeat
  * was missed.
  */
-export function OfflineBanner({ cameraOffline, realtimeDown, cameraSince, cacheSyncedAt, now }: Props) {
+export function OfflineBanner({ cameraOffline, realtimeDown, cameraSince, cacheSyncedAt, engine, now }: Props) {
   if (!cameraOffline && !realtimeDown) return null
 
   const heartbeatAgo = cameraSince === null ? null : Math.round((now - cameraSince) / 1000)
@@ -42,7 +43,7 @@ export function OfflineBanner({ cameraOffline, realtimeDown, cameraSince, cacheS
       )}
 
       <span className="banner__right">
-        {ENGINE_URL ? 'CLOUD ENGINE OK' : 'ENGINE · M1'}
+        {engineLabel(engine)}
         {' · '}
         {cacheSyncedAt ? `LIST CACHED ${formatShortClock(cacheSyncedAt)}` : 'LIST NOT YET CACHED'}
       </span>

@@ -44,12 +44,12 @@ export function CheckStage({ event, vehicle, onAct, onConfirm }: Props) {
         <section className="panel">
           <span className="panel__label">WHAT THE CAMERA SAW</span>
 
-          {/* events.image_path stays null until the engine writes crops in M1. */}
+          {/* events.image_path stays null until the engine writes crops in M3 (§8). */}
           <div className="crop">
             <span className="plate plate--chip" style={{ fontSize: 22 }}>
               {formatPlate(event.plate_raw ?? best)}
             </span>
-            <span className="crop__note">NO CROP · M1</span>
+            <span className="crop__note">NO CROP · M3</span>
           </div>
 
           {event.plate_raw && (

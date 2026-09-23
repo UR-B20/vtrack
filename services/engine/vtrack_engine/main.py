@@ -41,7 +41,7 @@ from .auth import AuthError, Device, DeviceRegistry, check_claim
 from .clock import now_utc, today_at_gate
 from .config import Settings, load_settings, service_key_problem
 from .db import EventStore, StoreError, SupabaseStore
-from .decide import Interpretation, decide, interpret
+from .decide import Interpretation, as_truncated_read, decide, interpret
 from .dedupe import Insert, merge, window_start
 from .events import new_event_row, no_plate_response, response_from_row
 from .images import MAX_BYTES, ImageRejected, validate_jpeg
@@ -215,6 +215,11 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         th = settings.thresholds
         interp = interpret(chosen.text, chosen.confidence, th)
         vehicle = await store.get_vehicle(interp.plate_norm) if interp.early is None else None
+        # A foreign-shaped read may be an approved SG plate that lost its check letter:
+        # if its completion is on the list, ask rather than deny (decide.py).
+        if (vehicle is None and interp.early is None and interp.completion
+                and await store.get_vehicle(interp.completion) is not None):
+            interp = as_truncated_read(interp)
         verdict = decide(interp, vehicle, today_at_gate(), th)
 
         async with state.lane_lock(device.site, device.lane):
@@ -270,6 +275,10 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
                         x_device_token: Annotated[str | None, Header()] = None) -> Response:
         state = state_of(request)
         device = await authenticate(state, x_device_token, body.device_id)
+        # /capture pairs by sending a heartbeat, so a role mismatch is refused here: pairing a
+        # camera screen with the display's token must fail at pairing, not at the first frame.
+        if body.role and body.role != device.role:
+            raise AuthError(403, f"{device.id} is a {device.role} device, not a {body.role}")
         await require_store(state).touch_device(device.id, body.version, now_utc())
         return Response(status_code=204)
 
