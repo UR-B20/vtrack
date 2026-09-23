@@ -52,7 +52,7 @@ class EventStore(Protocol):
     async def insert_event(self, row: dict[str, Any]) -> dict[str, Any]: ...
     async def update_event(self, event_id: str, fields: dict[str, Any]) -> dict[str, Any]: ...
     async def touch_device(self, device_id: str, version: str | None,
-                           seen_at: datetime) -> None: ...
+                           seen_at: datetime) -> bool: ...
     async def aclose(self) -> None: ...
 
 
@@ -187,11 +187,15 @@ class SupabaseStore:
         return rows[0]
 
     async def touch_device(self, device_id: str, version: str | None,
-                           seen_at: datetime) -> None:
+                           seen_at: datetime) -> bool:
+        """False when there is no such row: a PATCH that matches nothing is not an error
+        to PostgREST, but it is to anyone expecting the row to show the device alive."""
         # PATCH, never upsert: an upsert without `role` violates its NOT NULL, and it would
         # let any valid token create device rows.
         fields: dict[str, Any] = {"last_seen_at": seen_at}
         if version:
             fields["version"] = version[:64]
-        await self._request("PATCH", "devices", params={"id": f"eq.{device_id}"},
-                            body=fields, prefer="return=minimal")
+        rows = await self._request("PATCH", "devices",
+                                   params={"id": f"eq.{device_id}", "select": "id"},
+                                   body=fields, prefer="return=representation")
+        return bool(rows)

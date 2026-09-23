@@ -38,9 +38,11 @@ class DeviceRegistry:
         self._tokens = dict(device_tokens)
         self._devices: dict[str, Device] = {}
         self.problems: dict[str, str] = {}
+        self._weak: set[str] = set()
         self.loaded = False
         for dev_id, token in self._tokens.items():
             if len(token) < MIN_TOKEN_LEN or "<" in token:
+                self._weak.add(dev_id)
                 self.problems[dev_id] = (
                     f"token is still the .env.example placeholder or shorter than "
                     f"{MIN_TOKEN_LEN} characters — generate a real one"
@@ -66,6 +68,18 @@ class DeviceRegistry:
             else:
                 self._devices[dev_id] = Device(dev_id, row["role"], row["site"], row["lane"])
         self.loaded = True
+
+    def knows(self, token: str | None) -> bool:
+        """Is this one of the configured device tokens? Used only to widen /health, so it
+        holds even while the database is down. A placeholder or short token never counts:
+        the .env.example placeholder is public."""
+        if not token:
+            return False
+        match = False
+        for dev_id, known in self._tokens.items():
+            if hmac.compare_digest(known.encode(), token.encode()) and dev_id not in self._weak:
+                match = True
+        return match
 
     def resolve(self, token: str | None) -> Device:
         if not token:

@@ -123,12 +123,16 @@ class TestWrites:
         assert e.value.status == 404
 
     def test_heartbeat_is_a_patch_that_cannot_create_a_device(self):
-        rec = Recorder(status=204)
-        run(store(rec).touch_device("cam-a", "m1", T))
+        rec = Recorder([{"id": "cam-a"}])
+        assert run(store(rec).touch_device("cam-a", "m1", T)) is True
         assert (rec.last.method, rec.last.url.path) == ("PATCH", "/rest/v1/devices")
         assert rec.last.url.params["id"] == "eq.cam-a"
-        assert rec.last.headers["prefer"] == "return=minimal"
+        assert rec.last.headers["prefer"] == "return=representation"
         assert json.loads(rec.last.content) == {"last_seen_at": T.isoformat(), "version": "m1"}
+
+    def test_a_heartbeat_for_a_missing_row_says_so(self):
+        # PostgREST answers a PATCH that matches nothing with an empty list, not an error.
+        assert run(store(Recorder([])).touch_device("engine-1", "m2", T)) is False
 
 
 class TestFailures:

@@ -4,7 +4,8 @@ main.py — the VTrack Engine's HTTP surface (CLAUDE.md §5.5).
     POST /recognise   X-Device-Token (capture)   a frame   → one decided event
     POST /manual      X-Device-Token (display)   a plate   → one decided event, source=manual
     POST /heartbeat   X-Device-Token             liveness  → 204
-    GET  /health      none                       what is live, and whether it works
+    GET  /health      none (token adds detail)   what is live, and whether it works now
+    GET  /ready       none                       may this instance take the gate? (Render)
 
 Order inside /recognise is deliberate:
   1. the cheap refusals (token, rate, image, frame age) before anything expensive;
@@ -16,6 +17,14 @@ Order inside /recognise is deliberate:
      show a colour the guard's screen did not get.
 
 Run it with ONE worker: the lane locks live in this process. `uv run vtrack-engine` does.
+
+/ready vs /health. Render routes traffic by /ready. It answers from memory and is LATCHED:
+200 once the model is loaded and the database has answered once since start, then 200 for
+the life of the process. So a deploy with a wrong key never becomes ready — Render cancels
+it and the running engine keeps the gate — while a Supabase blip later on does not get a
+working engine restarted in a loop (restarting cannot fix Supabase). /health is the live
+truth for the status pills: 200 only while a frame could be decided AND stored right now.
+Its public body is status only (brief §3.10); a known device token adds the detail.
 """
 
 import asyncio
@@ -48,7 +57,7 @@ from .images import MAX_BYTES, ImageRejected, validate_jpeg
 from .pipeline import band_from_roi, conclude, lookups
 from .plates import CIVILIAN, checksum_letter, classify
 
-VERSION = "m1"
+VERSION = "m2"
 log = logging.getLogger("vtrack.engine")
 
 
@@ -68,7 +77,13 @@ class EngineState:
     model_status: str = "loading"            # loading | ready | error
     model_error: str | None = None
     db_error: str | None = None
+    # Coarse and public: db_not_configured | db_auth | db_unreachable.
+    db_reason: str | None = None
     db_checked_at: float = 0.0
+    db_answered: bool = False           # the database has answered at least once
+    ready: bool = False                 # /ready, latched (module docstring)
+    last_reason: str | None = "starting"
+    heartbeat_warned: bool = False
     started_at: float = field(default_factory=time.monotonic)
     lane_locks: dict[tuple[str, str], asyncio.Lock] = field(default_factory=dict)
 
@@ -98,11 +113,15 @@ class HeartbeatBody(BaseModel):
 
 
 def create_app(settings: Settings | None = None, store: EventStore | None = None,
-               alpr: ALPR | None = None, load_model: bool = True) -> FastAPI:
+               alpr: ALPR | None = None, load_model: bool = True,
+               background: bool | None = None) -> FastAPI:
     """Build the app. Production calls it bare and everything comes from the environment;
-    tests pass a store, an ALPR and settings in."""
+    tests pass a store, an ALPR and settings in. `background` runs the database probe and
+    the engine's own heartbeat on timers; by default only against the real Supabase."""
     settings = settings or load_settings()
     injected_store = store is not None
+    if background is None:
+        background = not injected_store
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -112,21 +131,26 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             if problem is None and not settings.supabase_url:
                 problem = "SUPABASE_URL is not set in services/engine/.env"
             if problem:
-                state.db_error = problem
+                state.db_error, state.db_reason = problem, "db_not_configured"
                 log.error("database not configured: %s", problem)
             else:
                 state.store = SupabaseStore(settings.supabase_url, settings.supabase_service_key)
         await _ensure_devices(state)
-        model_task = None
+        tasks: list[asyncio.Task] = []
         if state.alpr is not None:
             state.model_status = "ready"
         elif load_model:
-            model_task = asyncio.create_task(_load_model(state))
+            tasks.append(asyncio.create_task(_load_model(state)))
+        if background:
+            tasks.append(asyncio.create_task(_every(5.0, lambda: _probe_db(state, every_s=0))))
+            tasks.append(asyncio.create_task(
+                _every(settings.heartbeat_s, lambda: _engine_heartbeat(state))))
+        _note(state)
         try:
             yield
         finally:
-            if model_task:
-                model_task.cancel()
+            for task in tasks:
+                task.cancel()
             if state.store is not None:
                 await state.store.aclose()
 
@@ -288,18 +312,17 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
 
     # ── GET /health ────────────────────────────────────────────────────────────────
     @app.get("/health")
-    async def health(request: Request) -> JSONResponse:
+    async def health(request: Request,
+                     x_device_token: Annotated[str | None, Header()] = None) -> JSONResponse:
         state = state_of(request)
         await _probe_db(state)
-        db_ok = state.store is not None and state.db_error is None
-        body = {
+        reason = _not_ready_reason(state)
+        body: dict[str, Any] = {
             "engine": settings.alpr_engine,
             "model": state.alpr.model if state.alpr and state.model_status == "ready" else None,
             "model_status": state.model_status,
-            "model_error": state.model_error,
-            "db": "ok" if db_ok else "error",
-            "db_error": state.db_error,
-            "devices": state.registry.status(),
+            "db": "ok" if state.store is not None and state.db_error is None else "error",
+            "reason": reason,
             "thresholds": {
                 "conf_decide": settings.conf_decide, "conf_check": settings.conf_check,
                 "dedupe_s": settings.dedupe_s, "repair_max_subs": settings.repair_max_subs,
@@ -307,12 +330,25 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
                 "rate_limit_per_s": settings.rate_limit_per_s,
             },
             "uptime_s": int(time.monotonic() - state.started_at),
-            "version": VERSION,
+            "version": running_version(settings),
         }
-        # 200 only when a frame could actually be decided and stored, so a host health
-        # check (M2) sees the truth; the body says why either way.
-        ready = db_ok and state.model_status == "ready"
-        return JSONResponse(body, status_code=200 if ready else 503)
+        if state.registry.knows(x_device_token):
+            # A paired device may diagnose the engine; the public may not (§3.10). An
+            # unknown token is not an error here, just the public view.
+            body |= {"model_error": state.model_error, "db_error": state.db_error,
+                     "devices": state.registry.status()}
+        # 200 only while a frame could be decided and stored right now; `reason` says why not.
+        return JSONResponse(body, status_code=200 if reason is None else 503)
+
+    # ── GET /ready ─────────────────────────────────────────────────────────────────
+    @app.get("/ready")
+    async def ready(request: Request) -> JSONResponse:
+        state = state_of(request)
+        _note(state)
+        if state.ready:
+            return JSONResponse({"ready": True})
+        return JSONResponse({"ready": False, "reason": _not_ready_reason(state) or "db_waiting"},
+                            status_code=503)
 
     return app
 
@@ -321,6 +357,77 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
 
 def _ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
+
+
+def running_version(settings: Settings) -> str:
+    commit = settings.render_git_commit[:7]
+    return f"{VERSION}+{commit}" if commit else VERSION
+
+
+def _not_ready_reason(state: EngineState) -> str | None:
+    """Why a frame could not be decided and stored right now — coarse, and public."""
+    if state.model_status != "ready":
+        return "model_loading" if state.model_status == "loading" else "model_error"
+    if state.store is None:
+        return state.db_reason or "db_not_configured"
+    if state.db_error is not None:
+        return state.db_reason or "db_unreachable"
+    return None
+
+
+def _note(state: EngineState) -> None:
+    """Latch /ready, and log each change of readiness once: Render → Logs is where the
+    owner looks when a deploy does not go live. Reasons only — never a plate or a token."""
+    if not state.ready and state.model_status == "ready" and state.db_answered:
+        state.ready = True
+        log.info("ready: plate model loaded, database answered")
+    reason = _not_ready_reason(state)
+    if reason != state.last_reason:
+        state.last_reason = reason
+        if reason:
+            log.warning("not able to decide frames: %s", reason)
+        else:
+            log.info("healthy")
+
+
+def _db_ok(state: EngineState) -> None:
+    state.db_error = state.db_reason = None
+    state.db_answered = True
+    _note(state)
+
+
+def _db_failed(state: EngineState, exc: StoreError) -> None:
+    state.db_error = exc.detail
+    state.db_reason = "db_auth" if exc.status in (401, 403) else "db_unreachable"
+    _note(state)
+
+
+async def _every(period_s: float, job) -> None:
+    """Run `job` now and then every `period_s`, forever; one failure never stops it."""
+    while True:
+        try:
+            await job()
+        except Exception:  # noqa: BLE001
+            log.exception("background job failed")
+        await asyncio.sleep(period_s)
+
+
+async def _engine_heartbeat(state: EngineState) -> None:
+    """Touch the engine's own `devices` row: the running version goes on record, and the
+    Supabase free tier, which pauses after 7 idle days, never goes idle while it runs."""
+    if state.store is None:
+        return
+    s = state.settings
+    try:
+        touched = await state.store.touch_device(s.engine_device_id, running_version(s),
+                                                 now_utc())
+    except StoreError as exc:
+        log.warning("engine heartbeat failed: %s", exc.detail)
+        return
+    if not touched and not state.heartbeat_warned:
+        state.heartbeat_warned = True
+        log.warning("no `devices` row for %s — has supabase/seed.sql been run?",
+                    s.engine_device_id)
 
 
 def _check_frame_age(captured_at: str | None, max_age_s: float) -> None:
@@ -361,10 +468,10 @@ async def _ensure_devices(state: EngineState) -> None:
     try:
         rows = await state.store.get_devices(state.registry.device_ids)
     except StoreError as exc:
-        state.db_error = exc.detail
-        log.error("could not load devices: %s", exc.detail)
+        _db_failed(state, exc)
         return
     state.registry.load(rows)
+    _db_ok(state)
 
 
 async def _probe_db(state: EngineState, every_s: float = 5.0) -> None:
@@ -375,10 +482,10 @@ async def _probe_db(state: EngineState, every_s: float = 5.0) -> None:
     state.db_checked_at = time.monotonic()
     try:
         await state.store.ping()
-        state.db_error = None
     except StoreError as exc:
-        state.db_error = exc.detail
+        _db_failed(state, exc)
         return
+    _db_ok(state)
     await _ensure_devices(state)
 
 
@@ -394,6 +501,7 @@ async def _load_model(state: EngineState) -> None:
         state.model_status = "error"
         state.model_error = f"{type(exc).__name__}: {exc}"
         log.error("plate model failed to load: %s", state.model_error)
+    _note(state)
 
 
 app = create_app()

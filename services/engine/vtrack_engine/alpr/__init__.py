@@ -11,4 +11,4 @@ def build_alpr(settings: Settings) -> ALPR:
         from .cloud_platerecognizer import CloudPlateRecognizer
         return CloudPlateRecognizer(settings.platerecognizer_token)
     from .local_fastalpr import LocalFastALPR
-    return LocalFastALPR()
+    return LocalFastALPR(threads=settings.alpr_threads, offline=settings.alpr_offline)

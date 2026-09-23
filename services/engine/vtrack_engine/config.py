@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     alpr_engine: Literal["local", "cloud"] = "local"
     platerecognizer_token: str = ""
     region: str = "sg"
+    # Inference threads (local_fastalpr.py). 1 suits Render Starter's half a CPU.
+    alpr_threads: int = 1
+    # Set in the image: the weights are baked in at build, so a missing file is an error,
+    # never a download on the gate's cold start.
+    alpr_offline: bool = False
+
+    # The engine's own `devices` row, touched every heartbeat_s so the running version is
+    # on record and the Supabase free tier never idles into a pause (§3).
+    engine_device_id: str = "engine-1"
+    heartbeat_s: float = 600
+    # Set by Render on every deploy; reported as the running version.
+    render_git_commit: str = ""
 
     # {"cam-a": "<token>", "display-b": "<token>"} — M0 bootstrap; M3 moves to token_hash.
     device_tokens: dict[str, str] = {}

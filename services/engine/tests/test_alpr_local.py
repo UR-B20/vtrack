@@ -173,3 +173,17 @@ def test_fast_alpr_installs_and_imports():
 
     assert hasattr(fast_alpr, "ALPR")
     assert "CPUExecutionProvider" in onnxruntime.get_available_providers()
+
+
+class TestOffline:
+    def test_missing_weights_are_an_error_not_a_download(self, monkeypatch, tmp_path):
+        import vtrack_engine.alpr.local_fastalpr as local
+        monkeypatch.setattr(local, "weight_files", lambda *a: [tmp_path / "gone.onnx"])
+        with pytest.raises(ALPRError, match="not in this image"):
+            LocalFastALPR(offline=True)
+
+    def test_the_weight_files_are_the_ones_the_hubs_cache(self):
+        from vtrack_engine.alpr.local_fastalpr import weight_files
+        names = [f.name for f in weight_files()]
+        assert names == ["yolo-v9-t-384-license-plates-end2end.onnx", "cct_xs_v2_global.onnx",
+                         "cct_xs_v2_global_plate_config.yaml"]
