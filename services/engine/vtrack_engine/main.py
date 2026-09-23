@@ -331,6 +331,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
                 "dedupe_s": settings.dedupe_s, "repair_max_subs": settings.repair_max_subs,
                 "max_frame_age_s": settings.max_frame_age_s,
                 "rate_limit_per_s": settings.rate_limit_per_s,
+                "detector_conf": settings.alpr_detector_conf,
             },
             "uptime_s": int(time.monotonic() - state.started_at),
             "version": running_version(settings),

@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 vtrack-engine = "vtrack_engine.__main__:main"
+vtrack-pair-qr = "vtrack_engine.pairqr:main"
 
 [dependency-groups]
 dev = [
@@ -28,6 +29,7 @@ dev = [
   "ruff==0.16.8",
   # Only for tests/test_db_schema.py, which replays the engine's payloads on real Postgres.
   "psycopg[binary]==3.3.6",
+  "qrcode==8.2",
 ]
 
 [build-system]

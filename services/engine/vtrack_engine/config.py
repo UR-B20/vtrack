@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     region: str = "sg"
     # Inference threads (local_fastalpr.py). 1 suits Render Starter's half a CPU.
     alpr_threads: int = 1
+    # The plate DETECTOR's own threshold (fast-alpr's default). Below it a plate is not found
+    # at all. The detector is small and its score moves with framing, so the M2 gate
+    # benchmark measures read rates against this; the decision thresholds are separate.
+    alpr_detector_conf: float = 0.4
     # Set in the image: the weights are baked in at build, so a missing file is an error,
     # never a download on the gate's cold start.
     alpr_offline: bool = False
