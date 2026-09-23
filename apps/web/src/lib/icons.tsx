@@ -37,3 +37,13 @@ export const OfflineIcon = ({ className }: P) => (
     <path d="M9.6 15.6a5 5 0 0 1 4.2.3" /><path d="M12 19.5v.01" /><path d="M3 3l18 18" />
   </svg>
 )
+export const LockIcon = ({ className }: P) => (
+  <svg className={className} viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" {...base}>
+    <rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </svg>
+)
+export const CameraIcon = ({ className }: P) => (
+  <svg className={className} viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" {...base}>
+    <rect x="2.5" y="6.5" width="13" height="11" rx="2" /><path d="m15.5 10.5 6-3.5v10l-6-3.5z" />
+  </svg>
+)

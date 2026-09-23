@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePairing, storageKey } from './device'
+import { parsePairing, parsePairingCode, storageKey } from './device'
 
 const good = { deviceId: 'cam-a', token: 'x'.repeat(32) }
 
@@ -26,4 +26,20 @@ describe('parsePairing', () => {
 
 it('keeps capture and display pairings apart on one origin', () => {
   expect(storageKey('capture')).not.toBe(storageKey('display'))
+})
+
+describe('parsePairingCode (the QR from vtrack-pair-qr)', () => {
+  const token = 'x'.repeat(32)
+
+  it('reads the pairing payload', () => {
+    expect(parsePairingCode(`{"vtrack":1,"device":"cam-a","token":"${token}"}`)).toEqual({ deviceId: 'cam-a', token })
+  })
+
+  it('refuses any other QR code', () => {
+    expect(parsePairingCode('https://example.com/?token=' + token)).toBeNull()
+    expect(parsePairingCode(`{"device":"cam-a","token":"${token}"}`)).toBeNull()      // no marker
+    expect(parsePairingCode(`{"vtrack":1,"device":"cam-a","token":"short"}`)).toBeNull()
+    expect(parsePairingCode(`{"vtrack":1,"device":"../x","token":"${token}"}`)).toBeNull()
+    expect(parsePairingCode('')).toBeNull()
+  })
 })

@@ -38,6 +38,22 @@ export function parsePairing(raw: string | null | undefined): Pairing | null {
   }
 }
 
+/**
+ * The pairing QR that `uv run vtrack-pair-qr cam-a` prints on the laptop:
+ * {"vtrack":1,"device":"cam-a","token":"…"}. JSON, never a link — a camera app that sees it
+ * opens nothing, and the token never enters a URL or a history. Anything else scanned (a
+ * poster's QR, a URL) is refused.
+ */
+export function parsePairingCode(text: string): Pairing | null {
+  try {
+    const v = JSON.parse(text) as { vtrack?: unknown; device?: unknown; token?: unknown }
+    if (!v || v.vtrack !== 1) return null
+    return parsePairing(JSON.stringify({ deviceId: v.device, token: v.token }))
+  } catch {
+    return null
+  }
+}
+
 export function loadPairing(role: DeviceRole): Pairing | null {
   try {
     return parsePairing(localStorage.getItem(storageKey(role)))

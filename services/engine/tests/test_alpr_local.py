@@ -187,3 +187,17 @@ class TestOffline:
         names = [f.name for f in weight_files()]
         assert names == ["yolo-v9-t-384-license-plates-end2end.onnx", "cct_xs_v2_global.onnx",
                          "cct_xs_v2_global_plate_config.yaml"]
+
+
+def test_the_detector_threshold_is_config_not_a_literal(monkeypatch):
+    seen = {}
+
+    def fake_init(self, **kw):
+        seen.update(kw)
+
+    import vtrack_engine.alpr.local_fastalpr as local
+    from vtrack_engine.alpr import build_alpr
+    from vtrack_engine.config import Settings
+    monkeypatch.setattr(local.LocalFastALPR, "__init__", fake_init)
+    build_alpr(Settings(_env_file=None, alpr_detector_conf=0.25))
+    assert seen["detector_conf"] == 0.25

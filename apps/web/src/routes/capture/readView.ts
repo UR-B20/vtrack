@@ -25,11 +25,28 @@ export interface ReadView {
   repaired: boolean
 }
 
+/** Plates were seen but not read (engine alpr/base.py select): say why, and what to change. */
+const REJECTED: Record<NonNullable<RecogniseResult['rejected']>, { word: string; detail: string }> = {
+  edge: {
+    word: 'PLATE AT THE EDGE',
+    detail: 'The plate is cut by the edge of the lane box. Move or widen the box so the stopped car\'s plate sits well inside it.',
+  },
+  size: {
+    word: 'PLATE NOT AT THE STOP LINE',
+    detail: 'The plate is bigger or smaller than one at the stop line: a car nearer or further away. Set the plate size again if the stop line moved.',
+  },
+  multiple_plates: {
+    word: 'TWO PLATES IN THE LANE BOX',
+    detail: 'More than one plate is inside the lane box, so nothing was decided. Tighten the box around the stop line.',
+  },
+}
+
 export function readView(r: RecogniseResult): ReadView {
   if (!r.decision) {
+    const why = r.rejected ? REJECTED[r.rejected] : null
     return {
-      tone: 'none', word: 'NO PLATE IN VIEW', plate: null, confidence: '—',
-      detail: 'Hold the plate square to the camera, filling more of the frame, and tap again.',
+      tone: 'none', word: why?.word ?? 'NO PLATE IN VIEW', plate: null, confidence: '—',
+      detail: why?.detail ?? 'No plate was found in the lane box.',
       verify: false, repaired: false,
     }
   }

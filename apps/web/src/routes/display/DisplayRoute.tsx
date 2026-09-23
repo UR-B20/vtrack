@@ -5,6 +5,7 @@ import { isMuted, playDecision, setMuted, unlockAudio } from '../../lib/sounds'
 import { isDevMode } from '../../lib/router'
 import type { EventRow, VehiclePublic } from '../../lib/types'
 import { clearAt, initialState, reduce, stageEvent, type Action, type MachineState } from './displayMachine'
+import { useApplyUpdateWhenIdle } from '../../lib/updates'
 import { TopBar } from './TopBar'
 import { Stage } from './Stage'
 import { Rail } from './Rail'
@@ -149,6 +150,8 @@ export function DisplayRoute() {
 
   // ── derived ─────────────────────────────────────────────────────────────
   const current = stageEvent(state)
+  // A new version of the app waits for standby: never over a vehicle on the stage.
+  useApplyUpdateWhenIdle(current === null && !manualOpen)
   const dueAt = clearAt(state)
   const realtimeDown = Boolean(supabase) && !channelReady
   const showManual = realtimeDown || manualOpen

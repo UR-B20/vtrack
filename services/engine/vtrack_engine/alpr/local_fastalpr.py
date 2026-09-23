@@ -78,7 +78,8 @@ class LocalFastALPR:
     name = "fast-alpr"
 
     def __init__(self, detector_model: str = DETECTOR, ocr_model: str = OCR,
-                 threads: int = 1, offline: bool = False, _alpr: object | None = None) -> None:
+                 threads: int = 1, offline: bool = False, detector_conf: float = 0.4,
+                 _alpr: object | None = None) -> None:
         self.model = f"{detector_model} + {ocr_model}"
         if _alpr is None:
             if offline:
@@ -92,6 +93,7 @@ class LocalFastALPR:
             # CPU only, named: onnxruntime's default list also carries its Azure provider.
             cpu = ["CPUExecutionProvider"]
             _alpr = ALPR(detector_model=detector_model, ocr_model=ocr_model,
+                         detector_conf_thresh=detector_conf,
                          detector_providers=cpu, ocr_providers=cpu,
                          detector_sess_options=session_options(threads),
                          ocr_sess_options=session_options(threads))

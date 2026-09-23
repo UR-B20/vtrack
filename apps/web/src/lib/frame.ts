@@ -54,22 +54,59 @@ export interface Box {
   height: number
 }
 
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** How a `src`-sized picture sits in a `view` with object-fit: contain. */
+export function containFit(src: Size, view: Size): { scale: number; offX: number; offY: number } | null {
+  if (src.width <= 0 || src.height <= 0 || view.width <= 0 || view.height <= 0) return null
+  const scale = Math.min(view.width / src.width, view.height / src.height)
+  return { scale, offX: (view.width - src.width * scale) / 2, offY: (view.height - src.height * scale) / 2 }
+}
+
+/** Where a rectangle in CAMERA pixels (the lane ROI) sits on the letterboxed <video>. */
+export function rectToView(rect: Rect, camera: Size, view: Size): Box | null {
+  const fit = containFit(camera, view)
+  if (!fit) return null
+  return {
+    left: fit.offX + rect.x * fit.scale,
+    top: fit.offY + rect.y * fit.scale,
+    width: rect.width * fit.scale,
+    height: rect.height * fit.scale,
+  }
+}
+
 /**
- * Where a box in the SENT image's pixels lands on a <video> showing the whole frame
- * letterboxed (object-fit: contain). The sent image may be scaled down from the camera's
- * resolution, but never cropped, so its aspect ratio is the video's and one scale factor
- * maps it. Clamped to the view, so a box at the edge of the frame never draws off-screen.
+ * Where a box in the SENT image's pixels lands on the <video> (object-fit: contain).
+ *
+ * The sent image is the lane ROI (`crop`, in camera pixels), possibly scaled down by
+ * fitJpeg. So: undo the fit scale, add the ROI's offset in the camera frame, then place the
+ * camera frame in the view. Clamped to the view, so a box at an edge never draws off-screen.
  */
-export function mapBox(bbox: readonly [number, number, number, number], sent: Size, view: Size): Box | null {
-  if (sent.width <= 0 || sent.height <= 0 || view.width <= 0 || view.height <= 0) return null
-  const scale = Math.min(view.width / sent.width, view.height / sent.height)
-  const offX = (view.width - sent.width * scale) / 2
-  const offY = (view.height - sent.height * scale) / 2
+export function mapCropBox(
+  bbox: readonly [number, number, number, number], sent: Size, crop: Rect, camera: Size, view: Size,
+): Box | null {
+  if (sent.width <= 0 || sent.height <= 0 || crop.width <= 0 || crop.height <= 0) return null
+  const fit = containFit(camera, view)
+  if (!fit) return null
+  const sx = crop.width / sent.width
+  const sy = crop.height / sent.height
   const [x1, y1, x2, y2] = bbox
-  const left = Math.max(0, offX + Math.min(x1, x2) * scale)
-  const top = Math.max(0, offY + Math.min(y1, y2) * scale)
-  const right = Math.min(view.width, offX + Math.max(x1, x2) * scale)
-  const bottom = Math.min(view.height, offY + Math.max(y1, y2) * scale)
+  const toX = (x: number) => fit.offX + (crop.x + x * sx) * fit.scale
+  const toY = (y: number) => fit.offY + (crop.y + y * sy) * fit.scale
+  const left = Math.max(0, toX(Math.min(x1, x2)))
+  const top = Math.max(0, toY(Math.min(y1, y2)))
+  const right = Math.min(view.width, toX(Math.max(x1, x2)))
+  const bottom = Math.min(view.height, toY(Math.max(y1, y2)))
   if (right <= left || bottom <= top) return null
   return { left, top, width: right - left, height: bottom - top }
+}
+
+/** The whole frame was sent (TAP with no ROI): the crop is the frame itself. */
+export function mapBox(bbox: readonly [number, number, number, number], sent: Size, view: Size): Box | null {
+  return mapCropBox(bbox, sent, { x: 0, y: 0, width: sent.width, height: sent.height }, sent, view)
 }
