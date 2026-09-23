@@ -23,6 +23,15 @@ class TestEnvFile:
         assert (s.conf_decide, s.conf_check, s.dedupe_s, s.repair_max_subs) == (0.85, 0.60, 15, 2)
         assert s.alpr_engine == "local"
 
+    def test_a_notepad_bom_does_not_hide_the_first_setting(self, tmp_path):
+        # Older Windows Notepad saves UTF-8 with a byte-order mark and CRLF line endings.
+        # The .env parser strips both today; this keeps it that way, since a BOM glued to
+        # the first key would read as "SUPABASE_URL is not set" with nothing visibly wrong.
+        env = tmp_path / ".env"
+        env.write_bytes(b"\xef\xbb\xbfSUPABASE_URL=https://p.supabase.co\r\nCONF_DECIDE=0.9\r\n")
+        s = Settings(_env_file=env)
+        assert (s.supabase_url, s.conf_decide) == ("https://p.supabase.co", 0.9)
+
     def test_env_file_is_found_from_the_package_not_the_cwd(self):
         path = Settings.model_config["env_file"]
         assert path == ENGINE_DIR / ".env" and path.is_absolute()
