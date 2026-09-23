@@ -1,0 +1,97 @@
+name: CI
+
+# Every pull request, and every push to main. The Pages workflow (deploy.yml) only ever ran
+# on main, which is how a broken build reached main before anyone saw it; this runs first.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web (typecheck · test · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `version:` — package.json's packageManager field is the single source of truth.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: A device token can never be built into the public bundle
+        # vite.config.ts refuses a production build with VITE_DEVICE_TOKEN set. Prove the
+        # guard still exists — and if it were ever removed, say whether the token leaked.
+        run: |
+          set +e
+          VITE_DEVICE_TOKEN=ci-canary-7f3a9c2e pnpm build > canary.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::a production build with VITE_DEVICE_TOKEN set succeeded — the vite.config.ts guard is gone"
+            if grep -rl ci-canary-7f3a9c2e apps/web/dist; then
+              echo "::error::and the token IS in the built JavaScript"
+            fi
+            exit 1
+          fi
+          if ! grep -q "VITE_DEVICE_TOKEN is set" canary.log; then
+            echo "::error::the canary build failed, but not because of the token guard"
+            cat canary.log
+            exit 1
+          fi
+          echo "guard refused the canary build, as it should"
+
+  engine:
+    name: engine (lint · pytest · schema)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/engine
+
+    # Real Postgres, so tests/test_db_schema.py replays the engine's payloads against the
+    # real migrations. It is configured to FAIL rather than skip if this is unreachable.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+
+    env:
+      VTRACK_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      UV_PYTHON: "3.12"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The same uv the lockfile was produced with; no third-party action needed.
+      - run: python -m pip install --disable-pip-version-check uv==0.8.17
+
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+
+      # The default run excludes `slow` (the real model, which downloads ~11 MB); it is run
+      # before each hand-over and on the laptop. Everything else runs here, with no secrets.
+      - run: uv run pytest

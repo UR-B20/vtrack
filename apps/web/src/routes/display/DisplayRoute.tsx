@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { CAMERA_DEVICE_ID, HEARTBEATS_ENABLED, SITE, supabase } from '../../lib/supabase'
+import { CAMERA_DEVICE_ID, ENGINE_URL, HEARTBEATS_ENABLED, SITE, supabase } from '../../lib/supabase'
 import { findVehicle, loadVehicles, refreshVehicles, REFRESH_MS, type CachedList } from '../../lib/cache'
 import { isMuted, playDecision, setMuted, unlockAudio } from '../../lib/sounds'
 import { isDevMode } from '../../lib/router'
@@ -12,6 +12,7 @@ import { OfflineBanner } from './OfflineBanner'
 import { ManualMode } from './ManualMode'
 import { SimulatePanel } from './SimulatePanel'
 import { storedActor, type GuardActionRequest } from './GuardActions'
+import { useEngineHealth } from '../../lib/useEngineHealth'
 
 /** Drives the hold/clear windows and the "READ n.n s AGO" line. */
 const TICK_MS = 250
@@ -49,6 +50,7 @@ export function DisplayRoute() {
   const [cameraOnline, setCameraOnline] = useState(true)
   const [cameraSince, setCameraSince] = useState<number | null>(null)
   const dev = useMemo(isDevMode, [])
+  const engineHealth = useEngineHealth(ENGINE_URL)
 
   const dispatch = useCallback((action: Action) => rawDispatch(action), [])
 
@@ -202,9 +204,10 @@ export function DisplayRoute() {
   )
 
   const onConfirm = useCallback((plateNorm: string) => {
-    // M1 sends this to the engine's POST /manual, which writes a source='manual' event.
-    // Until that exists, record the confirmation and clear the stage — the guard has
-    // decided, which is what the hold rule is waiting for.
+    // The engine's POST /manual exists from M1 (typed plates are never repaired; a bad check
+    // letter is refused). Wiring CONFIRM to it lands with guard actions + audit in M3 (§8).
+    // Until then, record the confirmation and clear the stage — the guard has decided,
+    // which is what the hold rule is waiting for.
     void recordAction(
       { action: 'confirmed', reason: `Confirmed as ${plateNorm}`, actor: storedActor() || null },
       current?.id ?? null,
@@ -221,6 +224,7 @@ export function DisplayRoute() {
       <TopBar
         now={now}
         cameraOnline={cameraOnline}
+        engine={engineHealth}
         muted={muted}
         onToggleMute={() => { const next = !muted; setMuted(next); setMutedState(next); unlockAudio() }}
       />
@@ -231,6 +235,7 @@ export function DisplayRoute() {
           realtimeDown={realtimeDown}
           cameraSince={cameraSince}
           cacheSyncedAt={cache.syncedAt}
+          engine={engineHealth}
           now={now}
         />
 

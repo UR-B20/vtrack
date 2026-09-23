@@ -32,11 +32,13 @@ export const DEVICE_ID = (import.meta.env.VITE_DEVICE_ID as string | undefined) 
 export const CAMERA_DEVICE_ID = 'cam-a'
 
 /**
- * Unset in M0 — there is no engine yet. The display treats "unset" as "not deployed"
- * and shows a muted pill, rather than reporting an outage that is really an absence.
+ * The VTrack Engine (§5.5): http://localhost:8000 in M1, public HTTPS from M2 — never a LAN
+ * address (§1). Unset reads as "not set", a muted pill, rather than as an outage that is
+ * really an absence. Health is always probed (useEngineHealth); a URL alone proves nothing.
  */
 export const ENGINE_URL = (import.meta.env.VITE_ENGINE_URL as string | undefined) || null
 
-/** Set once the engine writes heartbeats (M3). Until then `devices.last_seen_at` is
- *  always null, so a staleness rule would pin the OFFLINE banner on for all of M0. */
+/** The OFFLINE banner's heartbeat rule turns on with M3 (§8). /capture sends heartbeats from
+ *  M1, but on a laptop the camera page is opened and closed at will, and a banner that trips
+ *  whenever that tab is shut would teach the guard to ignore it before it ever matters. */
 export const HEARTBEATS_ENABLED = false

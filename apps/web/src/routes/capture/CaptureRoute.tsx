@@ -1,21 +1,43 @@
 /**
- * /capture — point A. Placeholder for M0.
+ * /capture — point A, the camera (CLAUDE.md §6.2).
  *
- * The real page (§6.2) is M1/M2: getUserMedia, a draggable lane ROI, presence + motion
- * gating so a stationary vehicle keeps being sampled without burning mobile data, and
- * POST /recognise against the engine. None of that exists yet, and a half-built camera
- * page would be worse than an honest one.
+ * M1 is TAP mode on the laptop webcam: one frame per tap (or Space), sent to POST /recognise,
+ * with the engine's answer overlaid for 3 s. The ROI, the presence + motion gate and burst
+ * sampling are M2 (§8) — they need the tablet at the gate to be tuned, not a laptop.
  */
+
+import { useState } from 'react'
+import { ENGINE_URL } from '../../lib/supabase'
+import { clearPairing, loadPairing, type Pairing } from '../../lib/device'
+import { PairDevice } from './PairDevice'
+import { CameraView } from './CameraView'
+
 export function CaptureRoute() {
+  const [pairing, setPairing] = useState<Pairing | null>(() => loadPairing('capture'))
+
+  if (!ENGINE_URL) {
+    return (
+      <div className="placeholder">
+        <span className="wordmark" style={{ fontSize: 30 }}>VTRACK</span>
+        <span className="placeholder__ms">CAPTURE · NO ENGINE SET</span>
+        <p className="placeholder__note">
+          Add <span className="mono">VITE_ENGINE_URL=http://localhost:8000</span> to{' '}
+          <span className="mono">apps/web/.env</span> and restart <span className="mono">pnpm dev</span>.
+        </p>
+      </div>
+    )
+  }
+
+  if (!pairing) return <PairDevice engineUrl={ENGINE_URL} onPaired={setPairing} />
+
   return (
-    <div className="placeholder">
-      <span className="wordmark" style={{ fontSize: 30 }}>VTRACK</span>
-      <span className="placeholder__ms">CAPTURE · M1</span>
-      <p className="placeholder__note">
-        The camera node arrives with the engine in M1. Until then the gate display runs on
-        simulated events, and the approved list is searchable at any time from
-        <span className="mono"> /display</span>.
-      </p>
-    </div>
+    <CameraView
+      engineUrl={ENGINE_URL}
+      pairing={pairing}
+      onUnpair={() => {
+        clearPairing('capture')
+        setPairing(null)
+      }}
+    />
   )
 }

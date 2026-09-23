@@ -12,6 +12,14 @@ dev-dist/
 .env.*
 !.env.example
 
+# python (services/engine)
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
 # test / tooling
 coverage/
 .vitest/

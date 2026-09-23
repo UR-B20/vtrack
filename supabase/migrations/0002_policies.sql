@@ -155,5 +155,5 @@ end $$;
 -- 6. Deferred to M3 (CLAUDE.md §4, §8)
 -- ---------------------------------------------------------------------------
 -- Retention via pg_cron: delete events older than 90 days and crops older than 7 days;
--- never delete guard_actions. Storage bucket `crops` (private, signed URLs) lands with the
--- engine in M1 — there are no crops to store until then.
+-- never delete guard_actions. Storage bucket `crops` (private, signed URLs) lands in M3
+-- with the events page (§8) — the engine writes no crops until then.

@@ -1,16 +1,19 @@
 import { formatClock, siteLabel } from '../../lib/format'
 import { SoundOnIcon, SoundOffIcon } from '../../lib/icons'
-import { ENGINE_URL, LANE, SITE } from '../../lib/supabase'
+import { LANE, SITE } from '../../lib/supabase'
+import type { EngineHealth } from '../../lib/engine'
+import { EnginePill } from '../../lib/EnginePill'
 
 interface Props {
   now: number
   cameraOnline: boolean
+  engine: EngineHealth
   muted: boolean
   onToggleMute: () => void
 }
 
 /** The 56 px top bar of §3: wordmark, where we are, the two status pills, mute, clock. */
-export function TopBar({ now, cameraOnline, muted, onToggleMute }: Props) {
+export function TopBar({ now, cameraOnline, engine, muted, onToggleMute }: Props) {
   return (
     <header className="topbar">
       <span className="wordmark" style={{ fontSize: 20 }}>VTRACK</span>
@@ -25,12 +28,9 @@ export function TopBar({ now, cameraOnline, muted, onToggleMute }: Props) {
         CAMERA A · {cameraOnline ? 'LIVE' : 'OFFLINE'}
       </span>
 
-      {/* No engine exists in M0. An unset VITE_ENGINE_URL means "not deployed yet",
-          which is not the same as an outage, so it reads as a muted pill rather than red. */}
-      <span className={`pill ${ENGINE_URL ? 'pill--ok' : ''}`}>
-        <span className="pill__dot" />
-        ENGINE · {ENGINE_URL ? 'CLOUD OK' : 'M1'}
-      </span>
+      {/* What the engine's /health last said — never merely that a URL is set. Unset reads
+          as a muted "not set", which is an absence, not an outage. */}
+      <EnginePill health={engine} />
 
       <button
         type="button"

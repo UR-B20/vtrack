@@ -1,0 +1,18 @@
+{
+  "processing_time": 112.4,
+  "results": [
+    {
+      "box": {"xmin": 378, "ymin": 428, "xmax": 905, "ymax": 553},
+      "plate": "snb9538e",
+      "region": {"code": "sg", "score": 0.91},
+      "score": 0.904,
+      "candidates": [{"score": 0.904, "plate": "snb9538e"}, {"score": 0.71, "plate": "snb953be"}],
+      "dscore": 0.87,
+      "vehicle": {"score": 0.8, "type": "Sedan", "box": {"xmin": 240, "ymin": 300, "xmax": 1040, "ymax": 640}}
+    }
+  ],
+  "filename": "frame.jpg",
+  "version": 1,
+  "camera_id": null,
+  "timestamp": "2026-09-22T06:00:00.000000Z"
+}

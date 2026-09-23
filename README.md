@@ -10,7 +10,9 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 
 ## Where this is
 
-**Milestone M0 — list + display.** The Supabase schema, the admin console Ranee uses to own the approved list, and the gate display driven by simulated events. The engine (M1), the camera node (M2) and heartbeats, crops and retention (M3) are not built yet; `/capture` is a placeholder.
+**Milestone M1 — first real read.** On top of M0's schema, admin console and gate display: the **VTrack Engine** (`services/engine`, Python 3.12 / FastAPI) and a working **`/capture`** page. Hold a plate to the laptop webcam, tap, and the decision reaches `/display` through Supabase Realtime. Everything runs on `localhost`.
+
+Still to come: cloud deploy, the tablet at the gate and presence gating (M2); heartbeat-driven OFFLINE banner, guard-action audit, crops and retention (M3).
 
 ---
 
@@ -32,7 +34,7 @@ pnpm typecheck
 |---|---|
 | `/display` | Point B, the gate screen. Add `?dev=1` for the Simulate panel. |
 | `/admin` | Vehicles CRUD, CSV import/export. Needs sign-in and the admin role. |
-| `/capture` | Point A. Placeholder until M1. |
+| `/capture` | Point A, the camera. Pair once, then **READ PLATE** (or Space). Needs the engine running. |
 
 ---
 
@@ -71,6 +73,62 @@ That grant is scoped to one device on one fake site precisely because the anon k
 
 ---
 
+## Run the engine (M1)
+
+The engine runs on your laptop next to `pnpm dev`. Windows PowerShell shown; macOS/Linux are the same commands.
+
+**Once:**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # installs uv; reopen PowerShell after
+cd services\engine
+uv sync                                                                              # Python 3.12 + everything, first time ~2 min
+uv run python -c "import secrets; print(secrets.token_urlsafe(24))"                  # run twice: one token per device
+```
+
+Create `services\engine\.env` (git-ignored — it holds a secret):
+
+```
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SERVICE_KEY=sb_secret_…        # Supabase → Settings → API Keys → Secret keys. NOT the publishable key.
+DEVICE_TOKENS={"cam-a":"<token 1>","display-b":"<token 2>"}
+ALLOWED_ORIGINS=http://localhost:5173
+```
+
+and in `apps\web\.env` add `VITE_ENGINE_URL=http://localhost:8000`, keeping `VITE_SITE=gate1`. Restart `pnpm dev` after.
+
+**Each time:**
+
+```powershell
+cd services\engine
+uv run vtrack-engine        # 127.0.0.1:8000 · one worker · no access log. First start downloads the model (~11 MB).
+```
+
+Open **http://127.0.0.1:8000/health**. Ready means `"db": "ok"`, `"model_status": "ready"`, and every device `ok`. Anything else is spelled out in the body — e.g. a publishable key where the secret key should be, a placeholder token, or a device with no row in `devices`.
+
+**Pair the camera:** open `http://localhost:5173/capture`, paste the `cam-a` token. It is checked against the engine before it is kept, and stored only in that browser.
+
+**The M1 test:** `/capture` and `/display` in **two side-by-side windows** (not tabs — a hidden tab throttles the display's clock). Hold a printed plate to the webcam and press **READ PLATE**; the result is on both screens within about a second.
+
+| On a laptop | Why |
+|---|---|
+| Engine on `127.0.0.1`, never `0.0.0.0` | reachable from this machine only: no firewall prompt, no LAN exposure (CLAUDE.md §1) |
+| Web app at `localhost:5173`, not `127.0.0.1:5173` | the engine allows exactly the origins in `ALLOWED_ORIGINS` |
+| The published Pages `/capture` cannot reach a laptop engine | Chrome blocks public sites from calling local addresses. M2 deploys the engine |
+| Front camera only | `/capture` asks for the rear camera as `ideal`, so a laptop falls back to its front one |
+
+**Tests:**
+
+```powershell
+cd services\engine
+uv run pytest            # everything fast — no network, no model
+uv run pytest -m slow    # the REAL model on rendered plates (downloads it on first run)
+```
+
+`tests/test_db_schema.py` replays the engine's real payloads on Postgres 16 with the real migrations; it runs when `VTRACK_TEST_PG_DSN` points at a superuser DSN, and always in CI.
+
+---
+
 ## How it is laid out
 
 ```
@@ -82,10 +140,20 @@ apps/web/src/
   routes/display/displayMachine.ts   the pure state machine
   routes/display/…   TopBar · Stage → SlabStage | CheckStage · Rail · ManualMode · OfflineBanner
   routes/admin/…     VehiclesTable · VehicleDrawer · csv.ts
+  routes/capture/…   CaptureRoute · PairDevice · CameraView · readView.ts
+  lib/engine.ts · device.ts · frame.ts   the engine client, per-role pairing, JPEG fit + box mapping
 supabase/            migrations, seed, admin_role, dev/
+services/engine/vtrack_engine/
+  plates.py          §5.1 verbatim + format_plate
+  decide.py          §5.2 — interpret → (lookup) → decide                     PURE
+  dedupe.py          §5.3 — merge on the exact key                            PURE
+  clock.py · images.py · config.py · auth.py · events.py
+  db.py              httpx → PostgREST with the service key
+  alpr/              base · local_fastalpr (default) · cloud_platerecognizer
+  main.py            /recognise /manual /heartbeat /health
 ```
 
-Four modules are pure and carry the tests: `plates.ts`, `status.ts`, `displayMachine.ts`, `csv.ts`. Everything that touches the network lives in the route components, which is what keeps those four testable.
+The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `displayMachine.ts`, `csv.ts`, `frame.ts`, `engine.ts` (its health classification), `device.ts`, `readView.ts`; in the engine `plates`, `decide`, `dedupe`, `clock`, `images`. Everything that touches the network lives in route components and `db.py`, which is what keeps the rest testable.
 
 ### Things worth knowing before changing them
 
@@ -103,6 +171,24 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 
 **TURNED AWAY is one tap; LET THROUGH is not.** Turning a vehicle away is the guard agreeing with a decision the system already made, so there is nothing to justify, and putting a form in front of the correct action is how you train people to stop using it. The row is still written to `guard_actions`. Letting a denied vehicle through is the override, and that one asks for a reason and a name (§3.10).
 
+### The engine's decisions worth knowing
+
+**Confidence is the weakest character, never the average.** fast-alpr reports per-character probabilities *including* near-certain padding slots. Averaged, a real misread with a 0.15 character scored 0.90 — a confident answer on a guess. `local_fastalpr.py` takes the minimum over the characters actually read, and the real model's output is a regression fixture.
+
+**Dedupe keys on `(site, lane, plate_norm)`, never "the latest event in the lane".** Otherwise an allowed car pulling away while a denied car sits at the guard would insert a newer event and take the stage: a green over a red.
+
+**A dropped check letter asks; it does not deny.** Through a webcam the real model once read a clear `SNB 9538 E` as `SNB9538` at 0.997. Without its letter that is the shape §5.1 calls *foreign*, which is never repaired — a confident DENY for an approved car. A Singapore check letter is determined by the rest of the plate, so when the read is not on the list but its one completion is, the answer is CHECK with the completion as the best guess. Never ALLOW: Sabah plates also begin with S.
+
+**An `invalid` read is offered to repair.** Every repair example in §5.1 breaks the pattern rather than the checksum, so read literally §5.2 would never repair them. `STRICT_SPEC_REPAIR` in `decide.py` restores the literal reading.
+
+**If the write fails, the answer has no decision in it.** `/capture` must never show a colour the guard's screen did not get.
+
+**Events take their site from the device's row.** `/display` filters on site; a token whose device has no row, or no site, is refused before anything is written.
+
+**Tokens never enter the bundle.** `vite.config.ts` refuses a production build while `VITE_DEVICE_TOKEN` is set, and CI proves it with a canary. Devices pair from their own screen, one storage key per role.
+
+**Supabase keys:** a new-style `sb_secret_…` key travels in `apikey` only; a legacy service-role JWT in both headers. A publishable key is refused at startup, and `/health`'s database probe reads a table the public key cannot, so `db: ok` proves the key is the right one.
+
 ---
 
 ## Deploy
@@ -110,3 +196,5 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 `.github/workflows/deploy.yml` builds `apps/web` and publishes to GitHub Pages on push to `main`, with the base path set to the repo name and `index.html` copied to `404.html` so deep links survive a cold load.
 
 Enable it once under **Settings → Pages → Source: GitHub Actions**.
+
+`.github/workflows/ci.yml` runs on every pull request and push to `main`: web typecheck, tests, build and the device-token canary; engine lint and tests against a Postgres 16 service.
