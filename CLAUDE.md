@@ -190,6 +190,8 @@ if today < valid_from or today > valid_until:  → deny,  reason=expired
 → allow  (attach owner_name, org_unit, pass_type, valid_until)
 ```
 Confidence between `CONF_CHECK` and `CONF_DECIDE` (0.85) still decides but sets `flags.verify=true` so the display shows a small "verify" badge. `foreign` and `mid` kinds are never repaired.
+
+> **Amended 23 Sep 2026 — see §11:** `invalid` reads are also offered to `repair()`, and a foreign-shaped read whose Singapore completion is on the list is CHECK. The code in `decide.py` follows the amended rule.
  
 ### 5.3 Dedupe and refinement
 Key = `(site, lane, plate_norm)`. A stopped vehicle produces many reads. If an event with the same key exists in the last `DEDUPE_S` (15 s, rolling from the last read): update it (`read_count += 1`, `last_read_at = now()`, keep the higher confidence, upgrade `check → allow/deny` if the new read decides) instead of inserting. A read whose plate differs from the current event's plate but is a confusable variant (checksum-repair candidate of it) is treated as the same vehicle. The display receives the UPDATE via Realtime and re-renders in place.
@@ -277,4 +279,6 @@ Barrier control (relay/GPIO), face or driver identification, plate spoofing dete
 | Point B | Guard-in-the-loop; amber CHECK state; chimes on with a mute toggle |
 | MID plates | On the list like everyone else (`vehicle_type='military'`) |
 | List owner | Ranee, in `/admin`; CSV import; FormSG visitor flow post-POC |
+| Plate repair (23 Sep 2026) | An `invalid` read is also offered to `repair()`: every §5.1 repair example (`SNB953BE`, `SG2O17C`, `SBS988OU`) is `invalid`, so §5.2 read literally would never repair them. Exactly one checksum-valid candidate that is on the list → ALLOW, marked REPAIRED; not on the list → CHECK. `STRICT_SPEC_REPAIR` in `decide.py` restores the literal §5.2 |
+| Dropped check letter (23 Sep 2026) | A foreign-shaped read not on the list whose one Singapore completion is on the list (`SNB9538` → `SNB9538E`) → CHECK `ambiguous`, never DENY and never ALLOW. Found when the real model dropped a check letter at 0.997 confidence |
  
