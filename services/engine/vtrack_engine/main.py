@@ -51,10 +51,10 @@ from .clock import now_utc, today_at_gate
 from .config import WHERE_SECRETS_LIVE, Settings, load_settings, service_key_problem
 from .db import EventStore, StoreError, SupabaseStore
 from .decide import Interpretation, decide, interpret
-from .dedupe import Insert, merge, window_start
+from .dedupe import Insert, Skip, merge, window_start
 from .events import new_event_row, no_plate_response, response_from_row
 from .images import MAX_BYTES, ImageRejected, validate_jpeg
-from .pipeline import band_from_roi, conclude, lookups
+from .pipeline import band_from_roi, conclude, lookups, seen_plate_from_form
 from .plates import CIVILIAN, checksum_letter, classify
 
 VERSION = "m2"
@@ -218,6 +218,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         device_id: Annotated[str | None, Form()] = None,
         captured_at: Annotated[str | None, Form()] = None,
         roi: Annotated[str | None, Form()] = None,
+        seen_plate: Annotated[str | None, Form()] = None,
         x_device_token: Annotated[str | None, Header()] = None,
     ) -> JSONResponse:
         t0 = time.perf_counter()
@@ -230,6 +231,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         _check_frame_age(captured_at, settings.max_frame_age_s)
         try:
             band = band_from_roi(roi)
+            seen = seen_plate_from_form(seen_plate)
         except ValueError as exc:
             raise ApiError(422, str(exc)) from exc
 
@@ -263,8 +265,10 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             existing = await store.find_open_event(
                 device.site, device.lane, interp.plate_norm,
                 window_start(now, settings.dedupe_s))
-            action = merge(existing, candidate, now, settings.dedupe_s)
-            if isinstance(action, Insert):
+            action = merge(existing, candidate, now, settings.dedupe_s, seen_plate=seen)
+            if isinstance(action, Skip):
+                row, deduped = candidate, False
+            elif isinstance(action, Insert):
                 row, deduped = await store.insert_event(action.row), False
             else:
                 row, deduped = await store.update_event(action.event_id, action.fields), True
@@ -273,7 +277,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             # A merge kept an earlier decision this frame did not look up for itself.
             vehicle = await store.get_vehicle(row["plate_norm"])
         return JSONResponse(response_from_row(row, vehicle=vehicle, conf_decide=th.conf_decide,
-                                              latency_ms=_ms(t0), deduped=deduped))
+                                              latency_ms=_ms(t0), deduped=deduped,
+                                              stored=not isinstance(action, Skip)))
 
     # ── POST /manual ───────────────────────────────────────────────────────────────
     @app.post("/manual")

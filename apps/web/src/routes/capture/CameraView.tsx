@@ -142,7 +142,7 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   const live = useRef({ rect, size, band: stored?.plateBand ?? null, saveFrames })
   live.current = { rect, size, band: stored?.plateBand ?? null, saveFrames }
 
-  const sendFrame = useCallback(async (target: { session: number; n: number } | null) => {
+  const sendFrame = useCallback(async (target: { session: number; n: number; seen: string | null } | null) => {
     const video = videoRef.current
     const { rect: r, size: cam, band, saveFrames: save } = live.current
     const fail = () => {
@@ -160,8 +160,12 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
           : `tap-${vehicleTag(capturedAt)}`
         downloadFrame(fitted.blob, target ? `${tag}-${String(target.n).padStart(2, '0')}.jpg` : `${tag}.jpg`)
       }
-      const result = await recognise(engineUrl, pairing, fitted.blob, capturedAt, roiField(band))
-      if (target) dispatch({ type: 'result', session: target.session, outcome: outcomeOf(result), now: performance.now() })
+      const result = await recognise(engineUrl, pairing, fitted.blob, capturedAt, roiField(band), target?.seen ?? null)
+      if (target) {
+        dispatch({
+          type: 'result', session: target.session, outcome: outcomeOf(result), plate: result.plate_norm, now: performance.now(),
+        })
+      }
       setShown({ result, view: readView(result), sent: { width: fitted.width, height: fitted.height }, crop: r, camera: cam, at: Date.now() })
       setOverlayOn(true)
       setError(null)
@@ -175,17 +179,16 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   }, [videoRef, dispatch, dev, engineUrl, pairing])
 
   // Act on what the presence machine asked for. StrictMode runs a reducer twice in
-  // development, so the same capture can be queued twice: each (session, frame) is sent once.
-  const handled = useRef(new Set<string>())
+  // development, so the same capture can be queued twice: each capture id is sent once.
+  const handled = useRef(new Set<number>())
   useEffect(() => {
     const effects = pending.current.splice(0)
     for (const e of effects) {
       if (e.type !== 'capture') continue
-      const key = `${e.session}:${e.n}:${presence.session?.failures ?? 0}`
-      if (handled.current.has(key)) continue
+      if (handled.current.has(e.id)) continue
       if (handled.current.size > 500) handled.current.clear()   // the page runs for days
-      handled.current.add(key)
-      void sendFrame({ session: e.session, n: e.n })
+      handled.current.add(e.id)
+      void sendFrame({ session: e.session, n: e.n, seen: e.seen })
     }
   }, [presence, sendFrame])
 

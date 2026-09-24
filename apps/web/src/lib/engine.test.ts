@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  classifyHealth, engineDetail, engineLabel, engineSite, engineTone, errorDetail, type Health,
+  classifyHealth, engineDetail, engineLabel, engineSite, engineTone, errorDetail, recognise, type Health,
 } from './engine'
 
 const health = (over: Partial<Health> = {}): Health => ({
@@ -75,5 +75,27 @@ describe('errorDetail', () => {
   })
   it('falls back to the status', () => {
     expect(errorDetail(null, 500)).toBe('the engine answered HTTP 500')
+  })
+})
+
+describe('recognise', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** The form the engine is sent, for a given seen plate. */
+  async function sent(seen: string | null): Promise<FormData> {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ event_id: null, decision: null }), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    await recognise(CLOUD, { deviceId: 'cam-a', token: 't' }, new Blob(['x']), new Date(), null, seen)
+    return (fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData
+  }
+
+  it('sends the plate already answered for as seen_plate', async () => {
+    expect((await sent('SBA1234G')).get('seen_plate')).toBe('SBA1234G')
+  })
+
+  it('never sends a seen_plate the engine would refuse: that would fail every frame', async () => {
+    expect((await sent(null)).has('seen_plate')).toBe(false)
+    expect((await sent('SBA 1234 G')).has('seen_plate')).toBe(false)
+    expect((await sent('A'.repeat(13))).has('seen_plate')).toBe(false)
   })
 })

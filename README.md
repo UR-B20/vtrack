@@ -170,11 +170,9 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 
 **CSV import runs on `classify()`, not on a bare checksum.** "Reject rows whose checksum fails" read literally would reject `MID 12345`, which has no checksum. And `repair()` is never called on an import: a silently repaired row would put a plate on the approved list that nobody typed.
 
-**Two deliberate departures from the canvas.**
+**The approved screen names the owner, as the canvas does.** Under PROCEED: "Tan Wei Ming · HQ Coy · Permanent pass · valid to 31 Dec 2026". M0 showed only "On the approved list", because owner names are personal data (brief §3.10) and the gate screen can be read from outside the post; the owner chose the details (24 Sep 2026). Mount the screen at B facing the guard, not the lane.
 
-`gate-allowed.png` shows the owner's name, unit, pass type and expiry under PROCEED. We render only "On the approved list". The guard needs none of it to wave a car through — the system has already decided — and the gate screen is readable from outside the post, so a green that broadcasts names is a privacy cost (brief §3.10) with no operational benefit. The details still appear where they are acted on: the DENY reason lines, manual mode, and `/admin`.
-
-In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB 953B E`, while `gate-allowed.png` shows the same event as the repaired `SNB 9538 E`. We render the best guess (`plate_norm`) everywhere; the raw read appears only in the CHECK stage's "what the camera saw" panel.
+**One deliberate departure from the canvas.** In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB 953B E`, while `gate-allowed.png` shows the same event as the repaired `SNB 9538 E`. We render the best guess (`plate_norm`) everywhere; the raw read appears only in the CHECK stage's "what the camera saw" panel.
 
 **TURNED AWAY is one tap; LET THROUGH is not.** Turning a vehicle away is the guard agreeing with a decision the system already made, so there is nothing to justify, and putting a form in front of the correct action is how you train people to stop using it. The row is still written to `guard_actions`. Letting a denied vehicle through is the override, and that one asks for a reason and a name (§3.10).
 
@@ -201,6 +199,7 @@ In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB
 **The camera sends only while a vehicle is in the lane** (`lib/presence.ts`). It compares a 64×36 thumbnail of the lane ROI with a picture of the lane empty. Each thumbnail is divided by its own brightness, so auto-exposure and headlights don't count, and presence is a *fraction* of changed cells, so a motorcycle does.
 - Per vehicle: a burst of up to 2 frames/s for 3 s, then one every 2 s, stopping at a confident answer or 12 frames.
 - A queued car that pulls in behind another gets its own frames, even though the lane never emptied.
+- A lookalike is told apart by its plate. When a vehicle already answered for is followed by the lane settling again, visibly changed, one frame re-reads it: a different plate is a new vehicle. That catches a car of the same model and colour pulling in nose to tail, or a printed plate swapped in the same hand, which change too little of the lane to count as a new vehicle by looks alone. The frame carries `seen_plate`, so the same car re-read never goes back up on the display.
 - Floodlights that make the lane look occupied for a minute with no plate are taken as the new empty lane.
 
 **No buffered retry.** The brief asked capture to buffer frames through a mobile-data drop. With presence gating, the next frame two seconds later is the retry, and it is fresher. A failed send doesn't use up the vehicle's 12.

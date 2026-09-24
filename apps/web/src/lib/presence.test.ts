@@ -23,13 +23,20 @@ const BIKE = withBlock(EMPTY, 28, 10, 8, 20, () => 220)                        /
 const BRIGHTER = (scene: number[]) => scene.map((v) => Math.min(255, v * 1.4))
 /** Floodlights on: a pool of light over part of the lane, not a vehicle. */
 const FLOODLIT = withBlock(EMPTY, 0, 20, 64, 16, (i) => 200 + (i % 20))
+/** Two cars of the same model and colour: only the plate (10×3 cells, ~1 % of the ROI) differs. */
+const plateOn = (car: number[], k: number) => withBlock(car, 27, 26, 10, 3, (i) => ((i * k) % 7 < 3 ? 30 : 230))
+const LOOK_1 = plateOn(CAR_A, 2)
+const LOOK_2 = plateOn(CAR_A, 3)
+/** The guard beside the car (~3 % of the ROI: moving, when they step in), and a step along. */
+const GUARD_L = withBlock(LOOK_1, 4, 8, 3, 24, () => 200)
+const GUARD_R = withBlock(LOOK_1, 6, 8, 3, 24, () => 200)
 
 const T = 250 // ms between samples (about 4 Hz)
 
 class Rig {
   state: PresenceState
   now = 0
-  captures: { session: number; n: number; at: number }[] = []
+  captures: { session: number; n: number; seen: string | null; at: number }[] = []
   effects: Effect[] = []
 
   constructor(state = initialPresence()) {
@@ -41,28 +48,29 @@ class Rig {
     this.state = step.state
     for (const e of step.effects) {
       this.effects.push(e)
-      if (e.type === 'capture') this.captures.push({ session: e.session, n: e.n, at: this.now })
+      if (e.type === 'capture') this.captures.push({ session: e.session, n: e.n, seen: e.seen, at: this.now })
     }
   }
 
-  /** Feed `scene` for `ms`. If `answer` is given, every capture is answered at once. */
-  hold(scene: number[], ms: number, answer?: Outcome) {
+  /** Feed `scene` for `ms`. If `answer` is given, every capture is answered at once, with
+   *  `plate` as the plate read. */
+  hold(scene: number[], ms: number, answer?: Outcome, plate: string | null = null) {
     const end = this.now + ms
     while (this.now < end) {
       const before = this.captures.length
       this.apply({ type: 'sample', grey: scene, now: this.now })
       if (answer && this.captures.length > before) {
         const c = this.captures[this.captures.length - 1]!
-        this.apply({ type: 'result', session: c.session, outcome: answer, now: this.now })
+        this.apply({ type: 'result', session: c.session, outcome: answer, plate, now: this.now })
       }
       this.now += T
     }
     return this
   }
 
-  answer(outcome: Outcome) {
+  answer(outcome: Outcome, plate: string | null = null) {
     const c = this.captures[this.captures.length - 1]!
-    this.apply({ type: 'result', session: c.session, outcome, now: this.now })
+    this.apply({ type: 'result', session: c.session, outcome, plate, now: this.now })
     return this
   }
 
@@ -307,6 +315,106 @@ describe('queued cars: the lane is never empty between them', () => {
     expect(r.captures).toHaveLength(12)
     r.hold(CAR_B, T).hold(CAR_A, T).hold(CAR_B, 2_000, 'confident')
     expect(r.sessionsStarted()).toBe(2)
+  })
+})
+
+// ── lookalikes: told apart by the plate (decision 4a) ─────────────────────────────────
+
+describe('a lookalike in the lane is told apart by its plate', () => {
+  /** Car 1 read confidently as SBA1234G, then it pulls away and car 2 rolls straight in. */
+  const firstReadThenSwap = (next: number[]) => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    r.hold(CAR_A_CREPT, T).hold(EMPTY, T).hold(CAR_A_CREPT, T)
+    return r.hold(next, 1_000)
+  }
+
+  it('two cars of the same model differ too little for decision 4 alone', () => {
+    expect(changedFraction(normalise(LOOK_1), normalise(LOOK_2), DEFAULT_CONFIG.cellT)).toBeLessThan(DEFAULT_CONFIG.presenceFrac)
+    expect(changedFraction(normalise(LOOK_1), normalise(LOOK_2), DEFAULT_CONFIG.cellT)).toBeGreaterThan(DEFAULT_CONFIG.recheckFrac)
+  })
+
+  it('re-reads a done vehicle once when the lane settles changed, telling the engine what it saw', () => {
+    const r = firstReadThenSwap(LOOK_2)
+    expect(r.captures).toHaveLength(2)
+    expect(r.captures[1]).toMatchObject({ session: r.captures[0]!.session, n: 2, seen: 'SBA1234G' })
+    expect(r.state.session?.rechecking).toBe(true)
+  })
+
+  it('a different plate is a new vehicle, and the re-read was its first frame', () => {
+    const r = firstReadThenSwap(LOOK_2).answer('confident', 'SNB9538E')
+    expect(r.state.session).toMatchObject({ sent: 1, done: 'confident', rechecking: false })
+    expect(r.state.session?.id).not.toBe(r.captures[0]!.session)
+    expect(r.state.seen).toBe('SNB9538E')
+  })
+
+  it('an unsure read of a different plate starts a session that keeps sending', () => {
+    const r = firstReadThenSwap(LOOK_2).answer('unsure', 'SKN8821R')
+    r.hold(LOOK_2, 3_000, 'unsure', 'SKN8821R')
+    const second = r.state.session!
+    expect(second.id).not.toBe(r.captures[0]!.session)
+    expect(second.sent).toBeGreaterThan(3)
+    // Still SBA1234G seen: a later frame reading it is the car before, and writes nothing.
+    expect(r.captures.at(-1)!.seen).toBe('SBA1234G')
+  })
+
+  it('the same plate is the same vehicle: nothing more is sent', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    r.hold(GUARD_L, 2_000, 'confident', 'SBA1234G')
+    expect(r.captures).toHaveLength(2)
+    expect(r.sessionsStarted()).toBe(1)
+    expect(r.state.session).toMatchObject({ done: 'confident', rechecking: false, sent: 2 })
+  })
+
+  it('no plate on the re-read (the guard in front of it) is the same vehicle', () => {
+    const r = firstReadThenSwap(LOOK_2).answer('no_plate')
+    expect(r.state.session).toMatchObject({ id: r.captures[0]!.session, done: 'confident', rechecking: false })
+    r.hold(LOOK_2, 5_000)
+    expect(r.captures).toHaveLength(2)
+  })
+
+  it('movement that leaves the lane as it was is not re-read', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    r.hold(GUARD_L, T).hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    expect(r.captures).toHaveLength(1)
+  })
+
+  it('re-reads count towards the vehicle\'s 12 frames', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    for (let i = 0; i < 20; i++) r.hold(GUARD_L, 1_000, 'confident', 'SBA1234G').hold(GUARD_R, 1_000, 'confident', 'SBA1234G')
+    expect(r.captures).toHaveLength(12)
+    expect(r.sessionsStarted()).toBe(1)
+  })
+
+  it('a failed re-read does not use up a frame', () => {
+    const r = firstReadThenSwap(LOOK_2).answer('failed')
+    expect(r.state.session).toMatchObject({ sent: 1, rechecking: false, done: 'confident' })
+  })
+
+  it('an empty lane forgets the plate: the next vehicle is sent without it', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G').hold(EMPTY, 4_000)
+    expect(r.state.seen).toBeNull()
+    r.hold(CAR_B, 1_000)
+    expect(r.captures.at(-1)!.seen).toBeNull()
+  })
+
+  it('a queued car found by decision 4 carries the plate before it', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G')
+    r.hold(CAR_A_CREPT, T).hold(CAR_B, T).hold(CAR_A, T).hold(CAR_B, 1_000)
+    expect(r.sessionsStarted()).toBe(2)
+    expect(r.captures.at(-1)!.seen).toBe('SBA1234G')
+  })
+
+  it('in TAP mode nothing is re-read', () => {
+    const r = calibrated().hold(LOOK_1, 2_000, 'confident', 'SBA1234G').send({ type: 'auto', on: false })
+    r.hold(CAR_A_CREPT, T).hold(EMPTY, T).hold(CAR_A_CREPT, T).hold(LOOK_2, 2_000)
+    expect(r.captures).toHaveLength(1)
+  })
+
+  it('every capture has its own id', () => {
+    const r = firstReadThenSwap(LOOK_2).answer('failed')
+    r.hold(GUARD_R, 2_000, 'failed')
+    const ids = r.effects.flatMap((e) => (e.type === 'capture' ? [e.id] : []))
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from vtrack_engine.dedupe import ADOPTABLE, Insert, OpenEvent, Update, merge, window_start
+from vtrack_engine.dedupe import ADOPTABLE, Insert, OpenEvent, Skip, Update, merge, window_start
 
 NOW = datetime(2026, 9, 22, 6, 0, 0, tzinfo=UTC)
 DEDUPE_S = 15
@@ -110,3 +110,22 @@ class TestDepartingCar:
                               confidence=0.8, vehicle_id="veh-SBA1234G")
         out = merge(a, read_of_a, NOW, DEDUPE_S)
         assert isinstance(out, Update) and out.event_id == "evA"
+
+
+class TestSeenPlate:
+    """/capture re-reads a car it already has a confident answer for when the lane settles
+    again without emptying — to tell a lookalike pulled in nose to tail from the same car."""
+
+    def test_a_re_read_after_the_window_writes_nothing(self):
+        # An insert would put the same car back on the display, with its chime.
+        gone = existing(last_read_at=window_start(NOW, DEDUPE_S) - timedelta(seconds=1))
+        assert merge(gone, candidate(), NOW, DEDUPE_S, seen_plate="SNB9538E") == Skip()
+        assert merge(None, candidate(), NOW, DEDUPE_S, seen_plate="SNB9538E") == Skip()
+
+    def test_a_re_read_inside_the_window_still_refines_the_event(self):
+        out = merge(existing(), candidate(), NOW, DEDUPE_S, seen_plate="SNB9538E")
+        assert isinstance(out, Update) and out.fields["read_count"] == 2
+
+    def test_a_different_plate_is_a_new_vehicle(self):
+        c = candidate(plate_norm="SBA1234G", plate_raw="SBA1234G")
+        assert merge(None, c, NOW, DEDUPE_S, seen_plate="SNB9538E") == Insert(c)
