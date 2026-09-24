@@ -45,16 +45,18 @@ def new_event_row(*, event_id: str, now: datetime, device: Device, interp: Inter
 
 
 def response_from_row(row: dict[str, Any], *, vehicle: VehicleRow | None, conf_decide: float,
-                      latency_ms: int, deduped: bool) -> dict[str, Any]:
+                      latency_ms: int, deduped: bool, stored: bool = True) -> dict[str, Any]:
     """§5.5's response, from the event AS STORED. After a dedupe merge that is the refined
-    event, not merely this frame's read, so /capture shows what /display shows."""
+    event, not merely this frame's read, so /capture shows what /display shows. `stored`
+    False: a re-read of the `seen_plate` that wrote nothing (dedupe.py Skip) — the answer
+    is this read's, and there is no event id."""
     decision = row["decision"]
     confidence = float(row["confidence"]) if row.get("confidence") is not None else None
     verify = decision != "check" and confidence is not None and confidence < conf_decide
     show_vehicle = vehicle if (vehicle and decision != "check") else None
     until = show_vehicle.valid_until if show_vehicle else None
     return {
-        "event_id": row["id"],
+        "event_id": row["id"] if stored else None,
         "plate_norm": row["plate_norm"],
         "plate_display": show_vehicle.plate_display if show_vehicle
         else format_plate(row["plate_norm"] or ""),

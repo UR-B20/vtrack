@@ -9,6 +9,7 @@ import type { Decision, DenyReason } from './types'
 import type { Pairing } from './device'
 
 export interface RecogniseResult {
+  /** null: no plate read, or a re-read of the `seen_plate` that wrote nothing. */
   event_id: string | null
   decision: Decision | null
   reason: DenyReason | null
@@ -85,9 +86,12 @@ async function jsonOrNull(res: Response): Promise<unknown> {
 
 const join = (base: string, path: string) => `${base.replace(/\/+$/, '')}${path}`
 
+/** What the engine accepts as `seen_plate` (services/engine pipeline.py SEEN_PLATE). */
+const SEEN_PLATE = /^[A-Z0-9]{1,12}$/
+
 export async function recognise(
   baseUrl: string, pairing: Pairing, frame: Blob, capturedAt: Date, roi: string | null = null,
-  timeoutMs = 8000,
+  seenPlate: string | null = null, timeoutMs = 8000,
 ): Promise<RecogniseResult> {
   const form = new FormData()
   form.append('image', frame, 'frame.jpg')
@@ -95,6 +99,10 @@ export async function recognise(
   form.append('captured_at', capturedAt.toISOString())
   // §5.5's optional roi: the calibrated plate width at the stop line (lib/roi.ts roiField).
   if (roi) form.append('roi', roi)
+  // The plate already answered for while the lane has not emptied (lib/presence.ts, 4a):
+  // a re-read of it writes no new event. Only ever a plate_norm: the engine refuses anything
+  // else, and a refused hint would fail every frame for the vehicle.
+  if (seenPlate && SEEN_PLATE.test(seenPlate)) form.append('seen_plate', seenPlate)
   const res = await request(join(baseUrl, '/recognise'), {
     method: 'POST', headers: { 'X-Device-Token': pairing.token }, body: form,
   }, timeoutMs)

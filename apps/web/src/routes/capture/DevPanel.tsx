@@ -68,8 +68,9 @@ export function DevPanel(props: {
       </div>
       <div className="mono capdev__line">
         LANE {p.lane.toUpperCase()} · SESSION {p.session ? `#${p.session.id} ${p.session.sent}/12${p.session.done ? ` ${p.session.done.toUpperCase()}` : ''}` : '—'}
-        {p.inFlight && ' · IN FLIGHT'}
+        {p.inFlight && (p.session?.rechecking ? ' · RE-READING' : ' · IN FLIGHT')}
       </div>
+      <div className="mono capdev__line">SEEN {p.seen ?? '—'}</div>
       {meter('PRESENCE', p.presenceLevel, tuning.presenceFrac)}
       {meter('MOTION', p.motionLevel, tuning.motionFrac)}
       {slider('presenceFrac', 'PRESENT AT')}

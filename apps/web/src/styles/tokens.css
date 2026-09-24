@@ -9,13 +9,15 @@
   --deny-field:  #8E1B1B; --deny:  #FF6B6B;      /* red   */
   --check-field: #8A5A00; --check: #F2B632;      /* amber */
   --offline: #4A5568;
-  --plate-bg: #111418; --plate-border: #F4F4F4;  /* plates render white-on-black, Courier New bold */
+  --plate-bg: #111418; --plate-border: #F4F4F4;  /* plates render white-on-black, IBM Plex Mono bold */
 }
 
-/* Type, per §3: system fonts only. */
+/* Type — amended 24 Sep 2026 (§11, Typefaces): bundled faces (styles/fonts.css), with §3's
+   system fonts kept as the fallback stack. */
 :root {
-  --font-ui: "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Courier New", monospace;   /* plates, times and IDs */
+  --font-ui: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Barlow Condensed", "Barlow", "Segoe UI", system-ui, sans-serif;  /* verbs, big titles */
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;   /* plates, times, IDs, console labels */
 }
 
 /* Display geometry, per §3: 1280×800 tablet landscape. */

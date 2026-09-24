@@ -253,6 +253,33 @@ class TestRefinement:
         assert rig.frame("SBA1234G").json()["deduped"] is False
         assert len(rig.events) == 2
 
+    def test_a_seen_plate_re_read_after_the_window_writes_nothing(self, rig):
+        # The lane never emptied, so /capture says the car is still there: no second event.
+        rig.frame("SBA1234G")
+        rig.store.events[rig.events[0]["id"]]["last_read_at"] = (
+            datetime.now(UTC) - timedelta(seconds=16)).isoformat()
+        body = rig.frame("SBA1234G", seen_plate="SBA1234G").json()
+        assert (body["event_id"], body["decision"], body["plate_norm"]) == (None, "allow", "SBA1234G")
+        assert body["vehicle"]["owner_name"] and body["deduped"] is False
+        assert len(rig.events) == 1
+
+    def test_a_seen_plate_re_read_inside_the_window_refines_the_event(self, rig):
+        first = rig.frame("SBA1234G", 0.8).json()
+        body = rig.frame("SBA1234G", 0.9, seen_plate="SBA1234G").json()
+        assert body["event_id"] == first["event_id"] and body["deduped"] is True
+        assert rig.events[0]["read_count"] == 2
+
+    def test_a_different_plate_than_the_seen_one_is_a_new_event(self, rig):
+        rig.frame("SBA1234G")
+        body = rig.frame("SNB9538E", seen_plate="SBA1234G").json()
+        assert body["event_id"] and len(rig.events) == 2
+
+    @pytest.mark.parametrize("seen", ["sba1234g", "SBA 1234 G", "SBA1234G;--", "A" * 13])
+    def test_a_malformed_seen_plate_is_refused_not_ignored(self, rig, seen):
+        r = rig.frame("SBA1234G", seen_plate=seen)
+        assert r.status_code == 422 and "seen_plate" in r.json()["detail"]
+        assert rig.events == []
+
 
 class TestFailedWrites:
     def test_a_failed_write_returns_an_error_and_no_decision(self, rig):

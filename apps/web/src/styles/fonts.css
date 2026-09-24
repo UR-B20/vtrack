@@ -1,0 +1,20 @@
+/* fonts.css — the console's typefaces, bundled with the app (CLAUDE.md §11, 24 Sep 2026).
+   Served from the app's own origin and precached by the service worker with everything
+   else, so the tablets render the same type offline and make no request to a font host.
+   Latin only, and only the weights the stylesheets use. All three are SIL OFL 1.1. */
+
+/* IBM Plex Mono: plates, times, IDs, and the tracked-caps labels of the console. */
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+@import '@fontsource/ibm-plex-mono/latin-700.css';
+
+/* Barlow: running UI text. Drawn from California highway signage. */
+@import '@fontsource/barlow/latin-400.css';
+@import '@fontsource/barlow/latin-500.css';
+@import '@fontsource/barlow/latin-600.css';
+@import '@fontsource/barlow/latin-700.css';
+
+/* Barlow Condensed: the stage's verbs and the big titles. */
+@import '@fontsource/barlow-condensed/latin-600.css';
+@import '@fontsource/barlow-condensed/latin-700.css';
+@import '@fontsource/barlow-condensed/latin-800.css';

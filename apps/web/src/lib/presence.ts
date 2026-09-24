@@ -35,6 +35,14 @@
  *    in the lane — is a different vehicle, and starts a new session, whether or not the
  *    last one had finished. A car creeping forward a little does not; a car leaving into an
  *    empty lane does not.
+ * 4a. ...AND A LOOKALIKE IS TOLD APART BY ITS PLATE (24 Sep 2026). Two cars of the same model
+ *    and colour, or a printed plate swapped for another in the same hand, differ only in
+ *    the plate: far less of the ROI than decision 4 needs. So when a vehicle is done and the
+ *    lane settles again after moving, with anything visibly changed, ONE frame is sent to
+ *    re-read it. The same plate (or none) is the same vehicle; a different plate is a new
+ *    one, and that frame was its first. The re-read counts towards the vehicle's 12, and
+ *    carries `seen` — the plate already answered for since the lane was last empty — so
+ *    the engine never writes the same car again (dedupe.py `seen_plate`).
  * 5. LIGHTING GUARD. "Present" for 60 s with no plate ever seen re-baselines: floodlights
  *    switching on at dusk would otherwise look like a vehicle that never leaves.
  * 6. ONE FRAME IN FLIGHT, and a failed send does not count towards the 12: a mobile-data
@@ -77,6 +85,9 @@ export interface PresenceConfig {
   rearmStillMs: number
   /** A frame in flight longer than this is treated as failed. */
   inFlightTimeoutMs: number
+  /** Decision 4a: a done vehicle is re-read when the settled lane differs by more than this.
+   *  Small: a plate is about 1 % of the ROI's cells. */
+  recheckFrac: number
 }
 
 export const DEFAULT_CONFIG: PresenceConfig = {
@@ -95,6 +106,7 @@ export const DEFAULT_CONFIG: PresenceConfig = {
   bgAlpha: 0.05,
   rearmStillMs: 500,
   inFlightTimeoutMs: 15_000,
+  recheckFrac: 0.005,
 }
 
 export type Lane = 'calibrating' | 'empty' | 'present'
@@ -120,6 +132,8 @@ export interface Session {
   firstSentAt: number | null
   lastSentAt: number | null
   done: 'confident' | 'cap' | 'failures' | null
+  /** A done vehicle's re-read (decision 4a) is in flight. */
+  rechecking: boolean
 }
 
 export interface PresenceState {
@@ -139,6 +153,10 @@ export interface PresenceState {
   settled: Float32Array | null
   movedSinceSettled: boolean
   plateSeenAt: number | null
+  /** The plate of the last confident answer since the lane was last empty (decision 4a). */
+  seen: string | null
+  /** Numbers every capture effect, so the component sends each exactly once. */
+  nextCaptureId: number
   /** For the ?dev=1 overlay. */
   presenceLevel: number
   motionLevel: number
@@ -146,7 +164,8 @@ export interface PresenceState {
 
 export type Action =
   | { type: 'sample'; grey: ArrayLike<number>; now: number }
-  | { type: 'result'; session: number; outcome: Outcome; now: number }
+  /** `plate`: the plate_norm the engine answered with, if any. */
+  | { type: 'result'; session: number; outcome: Outcome; plate?: string | null; now: number }
   /** The operator says the lane is empty now. */
   | { type: 'calibrate' }
   /** The ROI moved: the background no longer describes it. */
@@ -156,8 +175,9 @@ export type Action =
   | { type: 'auto'; on: boolean }
 
 export type Effect =
-  /** Grab the current frame and send it for this session. `n` counts from 1. */
-  | { type: 'capture'; session: number; n: number }
+  /** Grab the current frame and send it for this session. `n` counts from 1; `id` is unique;
+   *  `seen` goes to the engine as `seen_plate`. */
+  | { type: 'capture'; id: number; session: number; n: number; seen: string | null }
   | { type: 'rebaselined'; why: 'lighting' | 'operator' }
 
 export interface Step {
@@ -181,6 +201,8 @@ export function initialPresence(background: Float32Array | null = null, auto = t
     settled: null,
     movedSinceSettled: false,
     plateSeenAt: null,
+    seen: null,
+    nextCaptureId: 1,
     presenceLevel: 0,
     motionLevel: 0,
   }
@@ -228,9 +250,9 @@ export function reduce(state: PresenceState, action: Action, cfg: PresenceConfig
     case 'auto':
       return { state: { ...state, auto: action.on }, effects: [] }
     case 'reset':
-      return { state: { ...initialPresence(null, state.auto), nextSessionId: state.nextSessionId }, effects: [] }
+      return { state: { ...initialPresence(null, state.auto), ...counters(state) }, effects: [] }
     case 'restore':
-      return { state: { ...initialPresence(action.background, state.auto), nextSessionId: state.nextSessionId }, effects: [] }
+      return { state: { ...initialPresence(action.background, state.auto), ...counters(state) }, effects: [] }
     case 'calibrate': {
       if (!state.prev) return { state: { ...state, lane: 'calibrating', background: null }, effects: [] }
       return {
@@ -239,20 +261,30 @@ export function reduce(state: PresenceState, action: Action, cfg: PresenceConfig
       }
     }
     case 'result':
-      return onResult(state, action.session, action.outcome, action.now, cfg)
+      return onResult(state, action.session, action.outcome, action.plate ?? null, action.now, cfg)
     case 'sample':
       return onSample(state, normalise(action.grey), action.now, cfg)
   }
 }
 
+/** Numbers that stay unique across a reset, so an old answer never lands on a new session. */
+function counters(s: PresenceState) {
+  return { nextSessionId: s.nextSessionId, nextCaptureId: s.nextCaptureId }
+}
+
 function clearVehicle(s: PresenceState): PresenceState {
-  return { ...s, session: null, settled: null, movedSinceSettled: false, presentSince: null, absentSince: null }
+  return {
+    ...s, session: null, settled: null, movedSinceSettled: false, presentSince: null, absentSince: null, seen: null,
+  }
 }
 
 function startSession(s: PresenceState, now: number): PresenceState {
   return {
     ...s,
-    session: { id: s.nextSessionId, startedAt: now, sent: 0, failures: 0, firstSentAt: null, lastSentAt: null, done: null },
+    session: {
+      id: s.nextSessionId, startedAt: now, sent: 0, failures: 0, firstSentAt: null, lastSentAt: null,
+      done: null, rechecking: false,
+    },
     nextSessionId: s.nextSessionId + 1,
     settled: null,
     movedSinceSettled: false,
@@ -264,31 +296,49 @@ function finish(s: PresenceState, done: Session['done']): PresenceState {
   return { ...s, session: { ...s.session, done } }
 }
 
-function onResult(s: PresenceState, session: number, outcome: Outcome, now: number, cfg: PresenceConfig): Step {
+function onResult(
+  s: PresenceState, session: number, outcome: Outcome, plate: string | null, now: number, cfg: PresenceConfig,
+): Step {
   let next: PresenceState = s.inFlight?.session === session ? { ...s, inFlight: null } : s
   if (outcome === 'confident' || outcome === 'unsure' || outcome === 'rejected') next = { ...next, plateSeenAt: now }
   const cur = next.session
   // A late answer for a vehicle that has gone changes nothing else.
-  if (!cur || cur.id !== session || cur.done) return { state: next, effects: [] }
+  if (!cur || cur.id !== session) return { state: next, effects: [] }
+  if (cur.rechecking) return { state: onRecheck(next, cur, outcome, plate, now), effects: [] }
+  if (cur.done) return { state: next, effects: [] }
   if (outcome === 'failed') {
     const failures = cur.failures + 1
     next = { ...next, session: { ...cur, sent: Math.max(0, cur.sent - 1), failures } }
     if (failures >= cfg.maxFailures) next = finish(next, 'failures')
     return { state: next, effects: [] }
   }
-  if (outcome === 'confident') return { state: finish(next, 'confident'), effects: [] }
+  if (outcome === 'confident') return { state: finish({ ...next, seen: plate ?? next.seen }, 'confident'), effects: [] }
   if (cur.sent >= cfg.maxFrames) return { state: finish(next, 'cap'), effects: [] }
   return { state: next, effects: [] }
+}
+
+/** Decision 4a: the answer to a done vehicle's re-read. */
+function onRecheck(s: PresenceState, cur: Session, outcome: Outcome, plate: string | null, now: number): PresenceState {
+  const settled: Session = { ...cur, rechecking: false }
+  if (outcome === 'failed') return { ...s, session: { ...settled, sent: Math.max(0, cur.sent - 1) } }
+  const decided = outcome === 'confident' || outcome === 'unsure'
+  // The same plate, or no plate: still the vehicle that was answered for.
+  if (!decided || !plate || plate === s.seen) return { ...s, session: settled }
+  // A different plate: a different vehicle, and this frame was its first.
+  const next = startSession({ ...s, presentSince: now }, now)
+  next.session = { ...next.session!, sent: 1, firstSentAt: now, lastSentAt: now }
+  return outcome === 'confident' ? finish({ ...next, seen: plate }, 'confident') : next
 }
 
 function onSample(s0: PresenceState, cur: Float32Array, now: number, cfg: PresenceConfig): Step {
   const effects: Effect[] = []
   let s: PresenceState = { ...s0 }
+  let recheck = false
 
   // A frame stuck in flight must not freeze the lane.
   if (s.inFlight && now - s.inFlight.since >= cfg.inFlightTimeoutMs) {
     const stuck = s.inFlight.session
-    s = onResult(s, stuck, 'failed', now, cfg).state
+    s = onResult(s, stuck, 'failed', null, now, cfg).state
   }
 
   const motionLevel = s.prev ? changedFraction(cur, s.prev, cfg.cellT) : 0
@@ -343,11 +393,16 @@ function onSample(s0: PresenceState, cur: Float32Array, now: number, cfg: Presen
     // Decision 4: a different vehicle settling in the lane is a new session.
     if (moving) s.movedSinceSettled = true
     if (!moving && stillFor >= cfg.rearmStillMs) {
-      const handled = s.session && (s.session.done || s.session.sent > 0)
-      if (s.settled && s.movedSinceSettled && handled && presenceLevel > cfg.presenceFrac
-          && changedFraction(cur, s.settled, cfg.cellT) > cfg.presenceFrac) {
-        s = startSession(s, now)
-        s.presentSince = now
+      const sess = s.session
+      const handled = sess && (sess.done || sess.sent > 0)
+      if (s.settled && s.movedSinceSettled && handled && presenceLevel > cfg.presenceFrac) {
+        const change = changedFraction(cur, s.settled, cfg.cellT)
+        if (change > cfg.presenceFrac) {
+          s = startSession(s, now)
+          s.presentSince = now
+        } else if (sess.done && change > cfg.recheckFrac) {
+          recheck = true      // decision 4a
+        }
       }
       s.settled = cur
       s.movedSinceSettled = false
@@ -356,7 +411,12 @@ function onSample(s0: PresenceState, cur: Float32Array, now: number, cfg: Presen
 
   // ── sending ──
   const sess = s.session
-  if (s.auto && s.lane === 'present' && sess && !sess.done && !s.inFlight) {
+  if (recheck && s.auto && s.lane === 'present' && sess?.done && !s.inFlight && sess.sent < cfg.maxFrames) {
+    const n = sess.sent + 1
+    s.session = { ...sess, sent: n, lastSentAt: now, rechecking: true }
+    s.inFlight = { session: sess.id, since: now }
+    effects.push(capture(s, sess.id, n))
+  } else if (s.auto && s.lane === 'present' && sess && !sess.done && !s.inFlight) {
     let due: boolean
     if (sess.firstSentAt === null) {
       due = !moving || now - sess.startedAt >= cfg.firstFrameMaxWaitMs
@@ -368,10 +428,17 @@ function onSample(s0: PresenceState, cur: Float32Array, now: number, cfg: Presen
       const n = sess.sent + 1
       s.session = { ...sess, sent: n, firstSentAt: sess.firstSentAt ?? now, lastSentAt: now }
       s.inFlight = { session: sess.id, since: now }
-      effects.push({ type: 'capture', session: sess.id, n })
+      effects.push(capture(s, sess.id, n))
     }
   }
   return { state: s, effects }
+}
+
+/** A capture effect, numbered from the state (which it advances). */
+function capture(s: PresenceState, session: number, n: number): Effect {
+  const id = s.nextCaptureId
+  s.nextCaptureId = id + 1
+  return { type: 'capture', id, session, n, seen: s.seen }
 }
 
 /** Frames sent for the current vehicle, for the chip ("3/12"). */

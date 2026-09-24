@@ -11,6 +11,7 @@ benchmark measures the decisions the gate makes rather than a copy of them:
 """
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -69,3 +70,18 @@ def band_from_roi(roi: str | None) -> PlateBand | None:
     if not 0 < lo < hi <= 1:
         raise ValueError("roi.plate_w must be fractions of the frame width, 0 < min < max ≤ 1")
     return PlateBand(lo, hi)
+
+
+SEEN_PLATE = re.compile(r"^[A-Z0-9]{1,12}$")
+
+
+def seen_plate_from_form(value: str | None) -> str | None:
+    """/recognise's optional `seen_plate`: the plate_norm /capture already has a confident
+    answer for, while the lane has not been empty since (dedupe.py). Raises ValueError for
+    anything that is not a plate_norm: a hint that is silently dropped would put the same
+    car back on the display."""
+    if value is None or not value.strip():
+        return None
+    if not SEEN_PLATE.match(value):
+        raise ValueError("seen_plate must be a plate_norm: A-Z and 0-9 only, at most 12")
+    return value

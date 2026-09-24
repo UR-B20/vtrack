@@ -1,5 +1,6 @@
 import { formatDate } from '../../lib/format'
 import { formatPlate } from '../../lib/plates'
+import { todayAtGate } from '../../lib/status'
 import { CheckIcon, CrossIcon } from '../../lib/icons'
 import { REASON_TITLE, VERB, type EventRow, type VehiclePublic } from '../../lib/types'
 import { GuardActions, type GuardActionRequest } from './GuardActions'
@@ -29,6 +30,20 @@ function denyDetail(event: EventRow, vehicle: VehiclePublic | null): string {
   }
 }
 
+/**
+ * The line under PROCEED, as in gate-allowed.png: "Tan Wei Ming · HQ Coy · Permanent pass ·
+ * valid to 31 Dec 2026". `today` is the gate's calendar date ('YYYY-MM-DD', todayAtGate).
+ * With no list row to hand (the cached list has not synced yet) it says only what is known.
+ */
+export function allowDetail(vehicle: VehiclePublic | null, today: string): string {
+  if (!vehicle) return 'On the approved list'
+  const pass = `${vehicle.pass_type.charAt(0).toUpperCase()}${vehicle.pass_type.slice(1)} pass`
+  const until = vehicle.valid_until
+    ? (vehicle.valid_until === today ? 'valid today' : `valid to ${formatDate(vehicle.valid_until)}`)
+    : null
+  return [vehicle.owner_name, vehicle.org_unit, pass, until].filter(Boolean).join(' · ')
+}
+
 /** allow and deny: one giant plate, one verb, one line saying why. gate-allowed / gate-denied. */
 export function SlabStage({ event, vehicle, onAct }: Props) {
   const allow = event.decision === 'allow'
@@ -44,17 +59,11 @@ export function SlabStage({ event, vehicle, onAct }: Props) {
       </div>
 
       {allow ? (
-        // Deliberately just this, not the owner's name and unit.
-        //
-        // The canvas (gate-allowed.png) showed "Tan Wei Ming · HQ Coy · Permanent pass ·
-        // valid to 31 Dec 2026", but the guard does not need any of it to wave a car
-        // through — the system has already decided — and the gate screen is readable from
-        // outside the post. Owner names are personal data (brief §3.10), so a green that
-        // broadcasts them is a privacy cost with no operational benefit.
-        //
-        // The details still exist where they are actually used: the DENY reason lines
-        // below, manual mode, and /admin.
-        <p className="stage__secondary">On the approved list</p>
+        // The owner's details, as the canvas has them (owner's decision, 24 Sep 2026 —
+        // CLAUDE.md §11). M0 had left them off because the gate screen can be read from
+        // outside the post and owner names are personal data (brief §3.10): place the
+        // screen so it faces the guard, not the lane.
+        <p className="stage__secondary">{allowDetail(vehicle, todayAtGate())}</p>
       ) : (
         <>
           <p className="stage__reason-title">{event.reason ? REASON_TITLE[event.reason] : 'Not allowed'}</p>
