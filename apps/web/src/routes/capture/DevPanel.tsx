@@ -8,7 +8,7 @@ import { roiQuality, type PlateBand, type Roi } from '../../lib/roi'
  * ?dev=1 only — the setup panel used at the gate (STOP 2), never shown to the guard:
  * live presence/motion levels against their thresholds, the thresholds themselves, the
  * camera and ROI resolution, the plate-size calibration, re-calibrating the empty lane, and
- * saving every frame sent for the benchmark (M2 Stage C).
+ * saving every frame sent, to see what the camera saw when a vehicle was missed.
  */
 export function DevPanel(props: {
   camera: Size
@@ -86,7 +86,7 @@ export function DevPanel(props: {
       </div>
       <label className="capdev__check">
         <input type="checkbox" checked={props.saveFrames} onChange={(e) => props.onSaveFrames(e.target.checked)} />
-        SAVE EVERY FRAME SENT (benchmark photos — they stay on this tablet)
+        SAVE EVERY FRAME SENT (to look into a missed read — personal data, delete when done)
       </label>
     </aside>
   )

@@ -1,8 +1,8 @@
 """
 pipeline.py — from what the reader saw to a decision. Pure: no I/O, no clock (CLAUDE.md §1).
 
-/recognise, the real-model tests and scripts/benchmark.py all run THESE functions, so the
-benchmark measures the decisions the gate makes rather than a copy of them:
+/recognise and the real-model tests both run THESE functions, so the tests check the
+decisions the gate makes rather than a copy of them:
 
     sel     = select(reads, width, height, band)             # which plate   (alpr/base.py)
     interp  = interpret(sel.read.text, sel.read.confidence, th)
