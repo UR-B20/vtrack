@@ -247,7 +247,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         if chosen is None:
             return JSONResponse(no_plate_response(_ms(t0), selection.rejected))
 
-        # The same pure steps the benchmark runs (pipeline.py); only the lookups are I/O.
+        # The same pure steps the real-model tests run (pipeline.py); only the lookups are I/O.
         th = settings.thresholds
         interp = interpret(chosen.text, chosen.confidence, th)
         plates = lookups(interp)

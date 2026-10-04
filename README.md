@@ -15,7 +15,7 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 **M2 — cloud deploy + tablet at the gate — in progress.**
 - **Stage A (live):** the engine runs as one always-on container on Render (Singapore), built from [`render.yaml`](render.yaml).
 - **Stage B:** `/capture` for the tablet at A, per `docs/screens/capture.png` — a lane ROI, presence gating that sends frames only while a vehicle is in the lane, QR pairing and a screen lock.
-- **Still to come in M2:** the gate benchmark.
+- **Left in M2:** the run at the gate (STOP 2). There is no benchmark and no IR camera: the gate is lit at all hours, so a night read is a lit read (CLAUDE.md §11, 4 Oct 2026).
 
 M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
@@ -264,7 +264,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 
 **Tablet B (the guard's screen):** open **https://ur-b20.github.io/vtrack/display**. The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
 
-**Benchmark photos (Stage C).** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):
+**Saving frames, to look into a missed read.** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):
 - turn off cloud backup of Downloads (Samsung Cloud / Google Photos);
 - move them to the laptop by USB, into a folder **outside** the repository and outside OneDrive;
 - delete them from the tablet, including its Trash.

@@ -49,7 +49,7 @@ export async function cropJpeg(video: HTMLVideoElement, rect: Rect): Promise<Fit
   return fitJpeg(rect.width, rect.height, encode)
 }
 
-/** ?dev=1: save the exact bytes that were sent, for the gate benchmark (M2 Stage C). */
+/** ?dev=1: save the exact bytes that were sent, to look into a missed read. */
 export function downloadFrame(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob)
   const a = Object.assign(document.createElement('a'), { href: url, download: name })
