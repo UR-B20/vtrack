@@ -6,7 +6,7 @@ export type Decision = 'allow' | 'deny' | 'check'
 
 export type DenyReason =
   | 'not_on_list' | 'expired' | 'suspended'
-  | 'unreadable' | 'low_confidence' | 'ambiguous' | 'invalid_pattern'
+  | 'unreadable' | 'low_confidence' | 'ambiguous' | 'invalid_pattern' | 'foreign'
 
 /** A row of `events`. Timestamps are ISO strings as PostgREST returns them. */
 export interface EventRow {
@@ -88,4 +88,5 @@ export const REASON_TITLE: Record<DenyReason, string> = {
   low_confidence: 'Read not confident enough',
   ambiguous: 'More than one possible plate',
   invalid_pattern: 'Not a recognisable plate',
+  foreign: 'Foreign plate',
 }

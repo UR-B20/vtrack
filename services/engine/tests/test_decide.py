@@ -103,6 +103,13 @@ class TestListDecisions:
         i, v = run("JHA 1234", 0.95, vehicles)
         assert (i.plate_kind, i.repaired_from, v.decision) == ("foreign", None, "deny")
 
+    def test_foreign_is_denied_whatever_the_list_says(self, vehicles):
+        # Owner's call, 8 Oct 2026: only Singapore plates are admitted.
+        i = interpret("JHA 1234", 0.95, DEFAULT_TH)
+        row = vehicles["SBA1234G"]
+        v = decide(i, row, TODAY, DEFAULT_TH)
+        assert (v.decision, v.reason) == ("deny", "foreign")
+
 
 class TestRepair:
     def test_repaired_and_on_the_list_allows(self, vehicles):

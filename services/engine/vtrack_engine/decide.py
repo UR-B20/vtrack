@@ -41,6 +41,12 @@ And one guard the spec does not have, which only ever turns a DENY into a CHECK:
   the read itself is not on the list and that completion IS, the answer is CHECK
   ("ambiguous"), with the completed plate as the best guess. Never a green: a genuinely
   foreign plate (Sabah plates also start with S) must not be allowed on an SG row.
+
+Foreign plates (owner's call, 8 Oct 2026): only Singapore plates are admitted. A confident
+`foreign` read is DENY, reason `foreign`, whatever the list says — a foreign row on the
+list does not admit it. The dropped-check-letter guard above runs first, so an approved
+Singapore car read without its check letter is still CHECK, not a red. A foreign read
+under CONF_CHECK stays CHECK (low_confidence): we are not sure it is foreign at all.
 """
 
 import re
@@ -53,7 +59,7 @@ from .plates import checksum_letter, classify, normalise, repair
 Decision = Literal["allow", "deny", "check"]
 Reason = Literal[
     "not_on_list", "expired", "suspended",
-    "unreadable", "low_confidence", "ambiguous", "invalid_pattern",
+    "unreadable", "low_confidence", "ambiguous", "invalid_pattern", "foreign",
 ]
 PlateKind = Literal["civilian", "mid", "foreign", "invalid"]
 
@@ -174,6 +180,10 @@ def decide(interp: Interpretation, vehicle: VehicleRow | None, today: date,
 
     # Only a result that still decides carries VERIFY; a CHECK is already a question.
     verify = interp.confidence < th.conf_decide
+
+    # Only Singapore plates are admitted (module docstring): no list row can admit this.
+    if interp.plate_kind == "foreign":
+        return Verdict("deny", "foreign", verify)
 
     if vehicle is None:
         # A repaired plate that is not on the list means we are not sure what we read:

@@ -273,7 +273,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             else:
                 row, deduped = await store.update_event(action.event_id, action.fields), True
 
-        if vehicle is None and row["decision"] != "check" and row.get("plate_norm"):
+        if (vehicle is None and row["decision"] != "check" and row.get("plate_norm")
+                and row.get("reason") != "foreign"):
             # A merge kept an earlier decision this frame did not look up for itself.
             vehicle = await store.get_vehicle(row["plate_norm"])
         return JSONResponse(response_from_row(row, vehicle=vehicle, conf_decide=th.conf_decide,

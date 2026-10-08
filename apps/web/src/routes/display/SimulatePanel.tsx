@@ -56,6 +56,11 @@ const SCENARIOS: Scenario[] = [
       confidence: 0.96, checksum_ok: true, repaired_from: null, decision: 'deny', reason: 'suspended' }),
   },
   {
+    key: 'foreign', label: 'DENY · foreign · JHA 1234',
+    row: () => ({ ...base, plate_raw: 'JHA 1234', plate_norm: 'JHA1234', plate_kind: 'foreign',
+      confidence: 0.95, checksum_ok: true, repaired_from: null, decision: 'deny', reason: 'foreign' }),
+  },
+  {
     key: 'mid', label: 'ALLOW · MID 12345',
     row: () => ({ ...base, plate_raw: '12345 MID', plate_norm: 'MID12345', plate_kind: 'mid',
       confidence: 0.91, checksum_ok: true, repaired_from: null, decision: 'allow', reason: null }),

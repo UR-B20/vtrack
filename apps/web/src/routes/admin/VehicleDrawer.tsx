@@ -48,20 +48,24 @@ export function VehicleDrawer({ vehicle, existing, onSave, onDelete, onClose }: 
     const m = /^([A-Z]{1,3})(\d{1,4})([A-Z])$/.exec(norm)
     const expected = m ? checksumLetter(m[1] as string, m[2] as string) : null
     const duplicate = canonical !== '' && canonical !== vehicle?.plate_norm && existing.has(canonical)
-    const valid = norm.length > 0 && kind !== 'invalid' && checksumOk && !duplicate
+    const valid = norm.length > 0 && kind !== 'invalid' && kind !== 'foreign' && checksumOk && !duplicate
     return { norm, kind, canonical, checksumOk, expected, duplicate, valid }
   }, [typed, existing, vehicle?.plate_norm])
 
   function note(): { text: string; tone: 'ok' | 'bad' | 'muted' } {
     if (!plate.norm) return { text: 'Enter the plate as painted on the vehicle.', tone: 'muted' }
     if (plate.kind === 'invalid') return { text: 'Not a recognisable plate pattern.', tone: 'bad' }
+    if (plate.kind === 'foreign') {
+      const m = /^([A-Z]{1,3})(\d{1,4})$/.exec(plate.norm)
+      const sg = m ? ` If it is Singapore's ${formatPlate(m[1]! + m[2]! + checksumLetter(m[1]!, m[2]!))}, add the check letter.` : ''
+      return { text: `Not a Singapore plate · only Singapore plates are admitted.${sg}`, tone: 'bad' }
+    }
     if (plate.kind === 'civilian' && !plate.checksumOk) {
       return { text: `Checksum fails · check letter should be ${plate.expected}.`, tone: 'bad' }
     }
     if (plate.duplicate) return { text: `${formatPlate(plate.canonical)} is already on the list.`, tone: 'bad' }
     const series =
       plate.kind === 'mid' ? 'MID series · no checksum'
-      : plate.kind === 'foreign' ? 'foreign plate · no checksum'
       : 'civilian series'
     return { text: `Checksum valid · ${series} · not yet on the list`, tone: 'ok' }
   }
