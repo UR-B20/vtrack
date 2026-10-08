@@ -244,7 +244,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 
 **Before you go:** if you ever ran `supabase/dev/simulate_policy.sql`, run `supabase/dev/simulate_policy_down.sql` now.
 
-**Tablet A (the camera)**
+**Tablet A (the camera)** — a phone works the same way: the page is designed in portrait.
 1. Turn **auto-rotate off**. Mount the tablet facing the vehicles as they arrive: queued cars then sit further back and look smaller, and motorcycles show their front number sticker.
 2. In Chrome, open **https://ur-b20.github.io/vtrack/capture?dev=1** on mobile data. `?dev=1` shows the setup panel; drop it once set up.
 3. **Pair it.**
@@ -256,6 +256,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
    - Drag the dashed box over the spot where a stopped vehicle's plate will be, and use the corner handle to size it.
    - Keep it at least 640 px wide; the label warns below that.
    - Tap **DONE — SAVE THE LANE ROI**.
+   - **Plate too small?** Use **ZOOM** in the dev panel first, then redo the box. The camera's own zoom gives a distant plate more real pixels; a smaller box only crops. The setting is kept on the device. Changing it recalibrates the empty lane and clears the plate size. If the panel says the camera offers no zoom, mount the device closer instead.
 6. **Let it calibrate:** keep the lane empty until the chip changes from **CALIBRATING** to **LANE EMPTY**. **LANE IS EMPTY** in the dev panel redoes this at any time.
 7. **Set the plate size:** when the first car stops and shows a green box, tap **SET PLATE SIZE**. Plates much bigger or smaller than that (a car nearer or further than the stop line) are then ignored.
 8. **Watch a few vehicles**, including a motorcycle.

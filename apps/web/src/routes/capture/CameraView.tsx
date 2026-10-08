@@ -63,7 +63,7 @@ interface Shown {
 
 export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   const dev = useMemo(isDevMode, [])
-  const { videoRef, camera } = useCamera()
+  const { videoRef, camera, zoom, setZoom } = useCamera()
   const health = useEngineHealth(engineUrl)
   const stageRef = useRef<HTMLDivElement>(null)
   const [viewSize, setViewSize] = useState<Size>({ width: 0, height: 0 })
@@ -82,7 +82,8 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   }, [aspect]) // eslint-disable-line react-hooks/exhaustive-deps
   const roi = stored?.roi ?? null
   const rect = useMemo(() => (size && roi ? roiPixels(roi, size) : null), [size, roi])
-  const signature = roi && aspect ? roiSignature(roi, aspect) : null
+  // Zooming changes what the box shows: the empty-lane picture is per zoom too.
+  const signature = roi && aspect ? roiSignature(roi, aspect, zoom?.value ?? 1) : null
 
   // ── presence ──────────────────────────────────────────────────────────────────────
   const [tuning, setTuning] = useState<Tuning>(store.tuning)
@@ -286,6 +287,11 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
     setStored(updated)
     saveRoi(updated)
   }
+  // A new zoom makes every plate a different size: the plate-size band no longer applies.
+  const changeZoom = (value: number) => {
+    setZoom(value)
+    if (stored?.plateBand) setBand(null)
+  }
 
   const shownRoi = draft ?? roi
   const lastBand = shown?.result.bbox ? bandFromBox(shown.result.bbox, shown.sent.width) : null
@@ -320,6 +326,7 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
             band={stored?.plateBand ?? null} canSetBand={Boolean(lastBand)}
             onSetBand={() => setBand(lastBand)} onClearBand={() => setBand(null)}
             onCalibrate={() => dispatch({ type: 'calibrate' })}
+            zoom={zoom} onZoom={changeZoom}
             saveFrames={saveFrames} onSaveFrames={(on) => { setSaveFramesState(on); store.setSaveFrames(on) }} />
         )}
       </div>
