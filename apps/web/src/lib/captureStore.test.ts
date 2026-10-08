@@ -37,3 +37,16 @@ describe('stored background', () => {
     expect(parseBackground('nope', sig)).toBeNull()
   })
 })
+
+describe('roiSignature and zoom', () => {
+  const roi = { x: 0.1, y: 0.2, w: 0.5, h: 0.4 }
+
+  it('is unchanged at 1×, so a background stored before zoom existed still fits', () => {
+    expect(roiSignature(roi, 16 / 9, 1)).toBe(roiSignature(roi, 16 / 9))
+  })
+
+  it('differs at another zoom: the same box then shows a different picture', () => {
+    expect(roiSignature(roi, 16 / 9, 2)).not.toBe(roiSignature(roi, 16 / 9))
+    expect(roiSignature(roi, 16 / 9, 2)).not.toBe(roiSignature(roi, 16 / 9, 3))
+  })
+})

@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { Size } from '../../lib/frame'
+import { store } from '../../lib/captureStore'
+import { clampZoom, zoomRange, type ZoomRange } from '../../lib/zoom'
 
 export type CameraState = { kind: 'starting' } | { kind: 'live'; size: Size } | { kind: 'failed'; message: string }
+
+/** The camera's own zoom, when it offers one (lib/zoom.ts). */
+export interface CameraZoom {
+  range: ZoomRange
+  value: number
+}
 
 function cameraProblem(e: unknown): string {
   const name = (e as { name?: string })?.name
@@ -15,10 +23,29 @@ function cameraProblem(e: unknown): string {
  * The rear camera into a <video>. `size` is the camera's own resolution (videoWidth ×
  * videoHeight), which the ROI, the crop and the box mapping are all measured in; it is
  * re-read when the stream changes shape (the tablet rotated).
+ *
+ * `zoom` is null when the camera (or the browser) offers none. The zoom last set on this
+ * device is re-applied when the camera starts.
  */
-export function useCamera(): { videoRef: RefObject<HTMLVideoElement | null>; camera: CameraState } {
+export function useCamera(): {
+  videoRef: RefObject<HTMLVideoElement | null>
+  camera: CameraState
+  zoom: CameraZoom | null
+  setZoom: (value: number) => void
+} {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const trackRef = useRef<MediaStreamTrack | null>(null)
   const [camera, setCamera] = useState<CameraState>({ kind: 'starting' })
+  const [zoom, setZoomState] = useState<CameraZoom | null>(null)
+
+  const applyZoom = useCallback(async (track: MediaStreamTrack, range: ZoomRange, wanted: number) => {
+    const value = clampZoom(wanted, range)
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: value } as MediaTrackConstraintSet] })
+      setZoomState({ range, value })
+      store.setZoom(value)
+    } catch { /* the camera refused this value: keep the last one */ }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -34,8 +61,9 @@ export function useCamera(): { videoRef: RefObject<HTMLVideoElement | null>; cam
     navigator.mediaDevices
       .getUserMedia({
         // `ideal`, not `exact`: a laptop has only a front camera. §6.2 asks for 1920 wide
-        // where the camera can give it.
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+        // where the camera can give it. `zoom: true` asks Chrome for the camera's zoom too;
+        // a camera without one still starts.
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, zoom: true } as MediaTrackConstraints,
         audio: false,
       })
       .then((s) => {
@@ -46,6 +74,14 @@ export function useCamera(): { videoRef: RefObject<HTMLVideoElement | null>; cam
           return
         }
         stream = s
+        const track = s.getVideoTracks()[0] ?? null
+        trackRef.current = track
+        const caps = track?.getCapabilities?.() as Record<string, unknown> | undefined
+        const range = zoomRange(caps?.zoom)
+        if (track && range) {
+          const current = (track.getSettings() as Record<string, unknown>).zoom
+          void applyZoom(track, range, store.zoom() ?? (typeof current === 'number' ? current : range.min))
+        }
         if (video) {
           video.srcObject = s
           void video.play().catch(() => undefined)
@@ -59,8 +95,14 @@ export function useCamera(): { videoRef: RefObject<HTMLVideoElement | null>; cam
       video?.removeEventListener('loadedmetadata', onSize)
       video?.removeEventListener('resize', onSize)
       stream?.getTracks().forEach((t) => t.stop())
+      trackRef.current = null
     }
-  }, [])
+  }, [applyZoom])
 
-  return { videoRef, camera }
+  const setZoom = useCallback((value: number) => {
+    const track = trackRef.current
+    if (track && zoom) void applyZoom(track, zoom.range, value)
+  }, [applyZoom, zoom])
+
+  return { videoRef, camera, zoom, setZoom }
 }

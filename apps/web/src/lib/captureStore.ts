@@ -1,12 +1,13 @@
 /**
  * captureStore.ts — what /capture keeps in this tablet's storage between page loads: AUTO
  * or TAP, the presence tuning set at the gate, and the empty-lane background (so a reload
- * with a car already in the lane still reads it — presence.ts, decision 3). The lane ROI
- * itself is in roi.ts. Parsers are pure; storage failures degrade to defaults.
+ * with a car already in the lane still reads it — presence.ts, decision 3), and the camera's
+ * zoom (zoom.ts). The lane ROI itself is in roi.ts. Parsers are pure; storage failures degrade to defaults.
  */
 
 import { DEFAULT_CONFIG, SAMPLE_CELLS, type PresenceConfig } from './presence'
 import type { Roi } from './roi'
+import { parseZoom } from './zoom'
 
 export type CaptureMode = 'auto' | 'tap'
 
@@ -33,9 +34,11 @@ export function parseTuning(raw: string | null): Tuning {
   return out
 }
 
-/** Which ROI, on which camera shape, a background describes. */
-export function roiSignature(roi: Roi, aspect: number): string {
-  return [roi.x, roi.y, roi.w, roi.h, aspect].map((n) => n.toFixed(3)).join(',')
+/** Which ROI, on which camera shape and at which zoom, a background describes. At 1× (or a
+ *  camera without zoom) the signature is the one stored before zoom existed. */
+export function roiSignature(roi: Roi, aspect: number, zoom = 1): string {
+  const base = [roi.x, roi.y, roi.w, roi.h, aspect].map((n) => n.toFixed(3)).join(',')
+  return Math.abs(zoom - 1) < 1e-3 ? base : `${base},z${zoom.toFixed(2)}`
 }
 
 export function parseBackground(raw: string | null, signature: string): Float32Array | null {
@@ -59,6 +62,7 @@ const KEY = {
   tuning: 'vtrack:capture:tuning',
   background: 'vtrack:capture:background',
   saveFrames: 'vtrack:capture:save-frames',
+  zoom: 'vtrack:capture:zoom',
 } as const
 
 function read(key: string): string | null {
@@ -86,4 +90,6 @@ export const store = {
     write(KEY.background, bg ? serialiseBackground(bg, signature) : null),
   saveFrames: () => read(KEY.saveFrames) === '1',
   setSaveFrames: (on: boolean) => write(KEY.saveFrames, on ? '1' : null),
+  zoom: (): number | null => parseZoom(read(KEY.zoom)),
+  setZoom: (z: number) => write(KEY.zoom, String(z)),
 }
