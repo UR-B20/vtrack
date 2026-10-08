@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parents[3]
 SQL = [Path(__file__).with_name("pg_shims.sql"),
        REPO / "supabase/migrations/0001_init.sql",
        REPO / "supabase/migrations/0002_policies.sql",
+       REPO / "supabase/migrations/0003_foreign_reason.sql",
        REPO / "supabase/seed.sql"]
 CAM = Device("cam-a", "capture", "gate1", "A")
 DISPLAY = Device("display-b", "display", "gate1", "A")
@@ -113,7 +114,7 @@ class TestPayloads:
         ("0BA1234G", 0.95, "check", "ambiguous"),
         ("HELLO", 0.95, "check", "invalid_pattern"),
         ("12345 MID", 0.95, "allow", None),
-        ("JHA 1234", 0.95, "deny", "not_on_list"),
+        ("JHA 1234", 0.95, "deny", "foreign"),
     ])
     def test_every_kind_of_event_inserts(self, db, text, conf, decision, reason):
         row = camera_row(text, conf)

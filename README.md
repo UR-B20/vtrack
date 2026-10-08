@@ -51,11 +51,12 @@ Paste these into the Supabase SQL editor **in order**:
 |---|---|---|
 | 1 | `supabase/migrations/0001_init.sql` | Schema. |
 | 2 | `supabase/migrations/0002_policies.sql` | RLS, the two public views, realtime. Re-runnable. |
-| 3 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. |
-| 4 | — | **Sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
-| 5 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
+| 3 | `supabase/migrations/0003_foreign_reason.sql` | Adds the `foreign` deny reason (only Singapore plates are admitted). Re-runnable. **An existing project:** run this before the engine that writes it deploys. |
+| 4 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. |
+| 5 | — | **Sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
+| 6 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
 
-Step 5's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
+Step 6's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
 
 Then create `apps/web/.env` from [`.env.example`](.env.example):
 

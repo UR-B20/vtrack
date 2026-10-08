@@ -8,7 +8,9 @@
  * reject MID 12345, which has no checksum at all — so the predicate runs on classify()
  * rather than on a bare last-character comparison: an unrecognisable pattern is
  * rejected, a civilian plate with the wrong check letter is rejected and told which
- * letter it should have been, and MID and foreign plates are accepted untouched.
+ * letter it should have been, and MID plates are accepted untouched. Foreign plates are
+ * rejected: only Singapore plates are admitted (CLAUDE.md §11, Foreign plates), so a
+ * foreign row could never let anyone in.
  *
  * repair() is deliberately never called here. Repairing a typed list would put a plate
  * on the approved list that nobody typed — the opposite of what an approved list is for.
@@ -136,6 +138,12 @@ export function parseVehicleCsv(text: string, existingPlateNorms: Set<string> = 
 
     if (!rawPlate) return reject('no plate')
     if (kind === 'invalid') return reject(`"${rawPlate}" is not a recognisable plate pattern`)
+    if (kind === 'foreign') {
+      // An SG plate that lost its check letter in the spreadsheet looks exactly like this.
+      const m = /^([A-Z]{1,3})(\d{1,4})$/.exec(canonical)
+      const hint = m ? ` (if it is Singapore's ${formatPlate(m[1]! + m[2]! + checksumLetter(m[1]!, m[2]!))}, add the check letter)` : ''
+      return reject(`not a Singapore plate: only Singapore plates are admitted${hint}`)
+    }
     if (kind === 'civilian' && !checksumOk) {
       const m = /^([A-Z]{1,3})(\d{1,4})([A-Z])$/.exec(normalise(rawPlate))
       const expected = m ? checksumLetter(m[1] as string, m[2] as string) : '?'
@@ -168,11 +176,7 @@ export function parseVehicleCsv(text: string, existingPlateNorms: Set<string> = 
       return rows.push({ ...base, verdict: 'duplicate_existing', reason: `${formatPlate(canonical)} is already on the list` })
     }
 
-    // Foreign plates carry no checksum, so we accept them but say so — an SG plate that
-    // lost its check letter in a spreadsheet looks exactly like a Malaysian one.
-    const warning = kind === 'foreign'
-      ? 'no checksum — treated as a foreign plate; check the check letter was not dropped'
-      : kind === 'mid' ? 'MID plate — no checksum' : null
+    const warning = kind === 'mid' ? 'MID plate — no checksum' : null
 
     rows.push({ ...base, verdict: 'ok', reason: warning })
   })

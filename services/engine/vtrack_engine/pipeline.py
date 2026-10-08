@@ -29,16 +29,19 @@ class Outcome:
 
 def lookups(interp: Interpretation) -> list[str]:
     """The plates `conclude` needs looked up. None when the read is already a CHECK. A
-    foreign-shaped read also needs its Singapore completion (decide.py, dropped check
-    letter)."""
+    foreign read is denied whatever the list says, so only its Singapore completion is
+    looked up (decide.py, dropped check letter)."""
     if interp.early is not None:
         return []
-    return [interp.plate_norm] + ([interp.completion] if interp.completion else [])
+    if interp.plate_kind == "foreign":
+        return [interp.completion] if interp.completion else []
+    return [interp.plate_norm]
 
 
 def conclude(interp: Interpretation, rows: Mapping[str, VehicleRow | None], today: date,
              th: Thresholds) -> Outcome:
-    vehicle = rows.get(interp.plate_norm) if interp.early is None else None
+    decided_on_row = interp.early is None and interp.plate_kind != "foreign"
+    vehicle = rows.get(interp.plate_norm) if decided_on_row else None
     # Not on the list as read, but its one Singapore completion is: we may be looking at an
     # approved car whose check letter the camera lost. Ask; never deny, never allow.
     if (vehicle is None and interp.early is None and interp.completion

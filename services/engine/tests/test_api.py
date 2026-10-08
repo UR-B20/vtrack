@@ -158,9 +158,9 @@ class TestRecogniseDecisions:
         second = rig.frame("SNB9538E", 0.95).json()
         assert second["event_id"] == first["event_id"] and second["decision"] == "allow"
 
-    def test_a_truly_foreign_unlisted_plate_is_still_deny(self, rig):
+    def test_a_foreign_plate_is_deny_foreign(self, rig):
         body = rig.frame("JHA1234", 0.95).json()
-        assert (body["decision"], body["reason"]) == ("deny", "not_on_list")
+        assert (body["decision"], body["reason"], body["vehicle"]) == ("deny", "foreign", None)
 
     def test_no_plate_writes_no_event(self, rig):
         rig.alpr.next = []
@@ -311,7 +311,7 @@ class TestManual:
 
     def test_mid_and_foreign_are_accepted(self, rig):
         assert rig.manual("12345 MID").json()["decision"] == "allow"
-        assert rig.manual("JHA 1234").json()["decision"] == "deny"
+        assert (rig.manual("JHA 1234").json()["reason"]) == "foreign"
 
     def test_manual_never_merges_with_the_camera(self, rig):
         rig.frame("SNB9538E", 0.5)                         # camera CHECK

@@ -38,20 +38,19 @@ describe('the rejection predicate', () => {
     expect(rows[0]?.kind).toBe('mid')
   })
 
-  it('accepts a foreign plate, with a warning rather than a rejection', () => {
+  it('rejects a foreign plate: only Singapore plates are admitted', () => {
     const [row] = parseVehicleCsv(csv('JHA 1234,Malaysian contractor,ABC,goods,contractor,,,'))
-    expect(row?.verdict).toBe('ok')
+    expect(row?.verdict).toBe('rejected')
     expect(row?.kind).toBe('foreign')
-    expect(row?.reason).toMatch(/no checksum/)
+    expect(row?.reason).toMatch(/not a Singapore plate/)
   })
 
-  it('flags a dropped check letter as foreign rather than silently importing it as SG', () => {
-    // 'SBA 1234' is indistinguishable from a Malaysian plate, so it imports — but the
-    // warning is what makes a spreadsheet that lost its last column visible.
+  it('names the Singapore plate a dropped check letter would have been', () => {
+    // 'SBA 1234' is indistinguishable from a Malaysian plate; the hint makes a spreadsheet
+    // that lost its last column fixable.
     const [row] = parseVehicleCsv(csv('SBA 1234,Someone,HQ,car,permanent,,,'))
-    expect(row?.verdict).toBe('ok')
-    expect(row?.kind).toBe('foreign')
-    expect(row?.reason).toMatch(/check letter was not dropped/)
+    expect(row?.verdict).toBe('rejected')
+    expect(row?.reason).toMatch(/SBA 1234 G/)
   })
 
   it('rejects an unrecognisable pattern', () => {

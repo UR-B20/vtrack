@@ -25,8 +25,8 @@ class TestLookups:
     def test_a_civilian_read_looks_itself_up(self):
         assert lookups(interpret("SBA 1234 G", 0.99, TH)) == ["SBA1234G"]
 
-    def test_a_foreign_shaped_read_also_looks_up_its_singapore_completion(self):
-        assert lookups(interpret("SNB9538", 0.99, TH)) == ["SNB9538", "SNB9538E"]
+    def test_a_foreign_read_looks_up_only_its_singapore_completion(self):
+        assert lookups(interpret("SNB9538", 0.99, TH)) == ["SNB9538E"]
 
 
 class TestConclude:
@@ -43,11 +43,25 @@ class TestConclude:
         assert (out.verdict.decision, out.verdict.reason) == ("check", "ambiguous")
         assert out.interp.plate_norm == "SNB9538E" and out.vehicle is None
 
-    def test_a_foreign_plate_that_is_itself_listed_is_decided_on_its_own_row(self, vehicles):
+    def test_a_foreign_plate_is_denied_even_when_it_is_on_the_list(self, vehicles):
         from dataclasses import replace
         row = replace(vehicles["SBA1234G"], id="veh-JHA1234", plate_norm="JHA1234")
         out = run("JHA1234", 0.95, {**vehicles, "JHA1234": row})
-        assert out.verdict.decision == "allow" and out.vehicle is row
+        assert (out.verdict.decision, out.verdict.reason) == ("deny", "foreign")
+        assert out.vehicle is None
+
+    def test_a_foreign_plate_not_on_the_list_is_denied_as_foreign(self, vehicles):
+        out = run("JHA1234", 0.95, vehicles)
+        assert (out.verdict.decision, out.verdict.reason) == ("deny", "foreign")
+
+    def test_a_dropped_check_letter_on_an_unlisted_plate_is_denied_as_foreign(self, vehicles):
+        # Its completion is not on the list either, so it is no approved car either way.
+        out = run("SKN8821", 0.95, vehicles)
+        assert (out.verdict.decision, out.verdict.reason) == ("deny", "foreign")
+
+    def test_an_unsure_foreign_read_is_still_check(self, vehicles):
+        out = run("JHA1234", 0.5, vehicles)
+        assert (out.verdict.decision, out.verdict.reason) == ("check", "low_confidence")
 
     def test_an_early_check_ignores_any_rows_it_is_given(self, vehicles):
         out = run("SBA1234F", 0.95, vehicles)

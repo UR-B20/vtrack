@@ -17,6 +17,8 @@ function denyDetail(event: EventRow, vehicle: VehiclePublic | null): string {
   switch (event.reason) {
     case 'not_on_list':
       return `No vehicle record for ${plate} · stop and verify with the driver`
+    case 'foreign':
+      return `${plate} is not a Singapore plate · only Singapore plates are admitted`
     case 'expired':
       return vehicle
         ? `${vehicle.owner_name} · pass ran out ${formatDate(vehicle.valid_until)} · stop and verify`
