@@ -4,7 +4,7 @@ import { findVehicle, loadVehicles, refreshVehicles, REFRESH_MS, type CachedList
 import { isMuted, playDecision, setMuted, unlockAudio } from '../../lib/sounds'
 import { isDevMode } from '../../lib/router'
 import type { EventRow, VehiclePublic } from '../../lib/types'
-import { clearAt, initialState, reduce, stageEvent, type Action, type MachineState } from './displayMachine'
+import { clearAt, initialState, okTakes, reduce, stageEvent, type Action, type MachineState } from './displayMachine'
 import { useApplyUpdateWhenIdle } from '../../lib/updates'
 import { TopBar } from './TopBar'
 import { Stage } from './Stage'
@@ -189,6 +189,18 @@ export function DisplayRoute() {
     }
   }, [])
 
+  // OK: the guard has seen the result. Back to standby, so the next car never arrives under
+  // the last car's colour. Written to guard_actions (the one table anon may write) as a
+  // record of when the result was seen; a failed write never keeps the result on screen.
+  const onOk = useCallback((id: string) => {
+    const at = Date.now()
+    if (!okTakes(state, id, at)) return
+    dispatch({ type: 'ok', id, now: at })
+    void supabase?.from('guard_actions')
+      .insert({ event_id: id, action: 'confirmed', reason: 'OK on the gate screen', actor: null })
+      .then(() => undefined, () => undefined)
+  }, [state, dispatch])
+
   const onLocalEvent = useCallback(
     (event: EventRow) => dispatch({ type: 'event', event, now: Date.now() }),
     [dispatch],
@@ -236,6 +248,7 @@ export function DisplayRoute() {
             cacheSyncedAt={cache.syncedAt}
             cacheCount={cache.count}
             cacheError={cache.syncError}
+            onOk={onOk}
           />
         )}
       </div>

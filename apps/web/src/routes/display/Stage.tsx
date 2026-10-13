@@ -21,6 +21,8 @@ interface Props {
   cacheCount: number
   /** Why the list did not refresh, if it did not. */
   cacheError: string | null
+  /** The guard has seen the result for this event. */
+  onOk: (eventId: string) => void
 }
 
 /** How much of the hold window is left, 0–1. */
@@ -34,11 +36,12 @@ const ICON = { allow: CheckIcon, deny: CrossIcon, check: WarnIcon }
 /**
  * The stage: the vehicle in front of the guard now, refined in place (brief §1).
  *
- * One layout for all three screens (screen.ts): plate, one word, one line. Nothing to press —
- * the phone at B is for looking at (owner's call, 13 Oct 2026); TYPE A PLATE stays in the rail.
+ * One layout for all three screens (screen.ts): plate, one word, one line, and OK — the one
+ * button (owner's call, 13 Oct 2026). OK clears the result once the guard has seen it, so the
+ * next car never pulls up under the last car's colour. TYPE A PLATE stays in the rail.
  */
 export function Stage(props: Props) {
-  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount, cacheError } = props
+  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount, cacheError, onOk } = props
 
   if (!event) {
     return (
@@ -91,11 +94,16 @@ export function Stage(props: Props) {
         <p className="stage__secondary">{screenLine(event, vehicle, todayAtGate())}</p>
       </div>
 
+      <button type="button" className="stage__ok" onClick={() => onOk(event.id)}
+        aria-label={`OK — seen ${formatPlate(event.plate_norm ?? '')} ${VERB[tone]}`}>
+        OK
+      </button>
+
       <div className="stage__foot">
         <div className="holdbar">
           <div className="holdbar__fill" style={{ width: `${holdProgress(stageSince, clearAt, now) * 100}%` }} />
         </div>
-        <span>CLEARS {HOLD.afterLastRead / 1000} s AFTER THE LAST READ · THE NEXT VEHICLE REPLACES IT</span>
+        <span>PRESS OK ONCE SEEN · OTHERWISE CLEARS {HOLD.afterLastRead / 1000} s AFTER THE LAST READ</span>
       </div>
     </section>
   )

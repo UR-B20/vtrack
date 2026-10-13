@@ -17,7 +17,7 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 - **Stage B:** `/capture` for the tablet at A, per `docs/screens/capture.png` — a lane ROI, presence gating that sends frames only while a vehicle is in the lane, QR pairing and a screen lock.
 - **Left in M2:** the run at the gate (STOP 2). There is no benchmark and no IR camera: the gate is lit at all hours, so a night read is a lit read (CLAUDE.md §11, 4 Oct 2026).
 
-**13 Oct 2026:** B is a phone in portrait with three screens (green, orange, red for foreign plates only) and no guard buttons; A is a desktop with a video capture card (CLAUDE.md §11).
+**13 Oct 2026:** B is a phone in portrait with three screens (green, orange, red for foreign plates only) and one OK button; A is a desktop with a video capture card (CLAUDE.md §11).
 
 M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
@@ -177,7 +177,7 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 
 **Three screens, mapped from the engine's answer** (owner, 13 Oct 2026; `routes/display/screen.ts`). Green PROCEED for `allow`. Red DO NOT ALLOW only for a foreign plate. Orange VERIFY MANUALLY for everything else: not on the list, expired, suspended, a corrected read, an unclear read. All three use the same layout, with one line under the verb saying why. The engine still stores its own decision and reason; only the screen groups them.
 
-**No guard buttons.** The guard decides at the gate and the screen only informs, so nothing is written to `guard_actions` and overrides are not recorded. A result stays up 30 s after the vehicle's last read, and the next vehicle replaces it at once.
+**One button: OK.** The guard decides at the gate and the screen only informs, so overrides are not recorded. OK says "I have seen it": the screen goes back to *Waiting for vehicle*, so the next car never pulls up under the last car's green, and the time is written to `guard_actions`. OK is ignored for a second after a new result appears, so a tap meant for one car cannot clear the next car's red. Without OK, a result stays up 30 s after the vehicle's last read; the next vehicle always replaces it at once.
 
 ### The engine's decisions worth knowing
 
@@ -282,7 +282,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 - Green **PROCEED**: on the list and valid.
 - Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
 - Red **DO NOT ALLOW**: a foreign plate.
-- Each result stays 30 s after the last read; the next vehicle replaces it. **TYPE A PLATE** searches the list by hand.
+- Press **OK** once you have seen the result: the screen goes back to *Waiting for vehicle*. Without OK it stays 30 s after the last read. The next vehicle always replaces it. **TYPE A PLATE** searches the list by hand.
 - The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
 
 **Saving frames, to look into a missed read.** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):

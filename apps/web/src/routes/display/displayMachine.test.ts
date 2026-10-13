@@ -234,6 +234,62 @@ describe('hold and clear (30 s after the last read, owner 13 Oct 2026)', () => {
   })
 })
 
+describe('OK — the guard has seen it (owner, 13 Oct 2026)', () => {
+  const green = ev({ id: 'g', decision: 'allow' }, 0)
+  const seen = (now = 2_000) => run([
+    { type: 'event', event: green, now: 0 },
+    { type: 'ok', id: 'g', now },
+  ])
+
+  it('clears the result at once, leaving it in the rail', () => {
+    const { state, effects } = seen()
+    expect(state.stageId).toBeNull()
+    expect(state.rail[0]?.id).toBe('g')
+    expect(effects).toEqual([{ type: 'sound', decision: 'allow' }])   // the arrival's chime only
+  })
+
+  it('a re-read of the same car does not bring it back, and does not chime', () => {
+    const reread = { ...green, read_count: 2, last_read_at: serverTs(5_000) }
+    const { state, effects } = run([{ type: 'event', event: reread, now: 5_000 }], seen().state)
+    expect(state.stageId).toBeNull()
+    expect(state.rail[0]?.read_count).toBe(2)
+    expect(effects).toEqual([])
+  })
+
+  it('nor does a reconnect followed by a re-read', () => {
+    const after = run([
+      { type: 'hydrate', events: [green] },
+      { type: 'event', event: { ...green, read_count: 3 }, now: 9_000 },
+    ], seen().state)
+    expect(after.state.stageId).toBeNull()
+  })
+
+  it('the next car still takes the stage and chimes', () => {
+    const red = ev({ id: 'r', decision: 'deny', reason: 'foreign' }, 6_000)
+    const { state, effects } = run([{ type: 'event', event: red, now: 6_000 }], seen().state)
+    expect(state.stageId).toBe('r')
+    expect(effects).toEqual([{ type: 'sound', decision: 'deny' }])
+  })
+
+  it('a tap meant for the last car cannot clear the next car as it appears', () => {
+    const red = ev({ id: 'r', decision: 'deny', reason: 'foreign' }, 6_000)
+    const start = run([
+      { type: 'event', event: green, now: 0 },
+      { type: 'event', event: red, now: 6_000 },
+    ])
+    // Pressed on the green, landing after the red took the stage.
+    expect(reduce(start.state, { type: 'ok', id: 'g', now: 6_100 }).state.stageId).toBe('r')
+    // Pressed on the red itself, but inside its first second.
+    expect(reduce(start.state, { type: 'ok', id: 'r', now: 6_000 + HOLD.okGrace - 1 }).state.stageId).toBe('r')
+    expect(reduce(start.state, { type: 'ok', id: 'r', now: 6_000 + HOLD.okGrace }).state.stageId).toBeNull()
+  })
+
+  it('does nothing in standby', () => {
+    const { state } = run([{ type: 'ok', id: 'g', now: 5_000 }])
+    expect(state).toEqual(initialState)
+  })
+})
+
 describe('clock skew — the timers must ignore the server clock entirely', () => {
   for (const skew of [-60_000, 0, 60_000]) {
     it(`a result still holds exactly 30 s with a ${skew / 1000}s skew`, () => {
