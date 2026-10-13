@@ -23,7 +23,7 @@ export function TopBar({ now, cameraOnline, engine, muted, onToggleMute }: Props
 
       <span className="topbar__spacer" />
 
-      <span className={`pill ${cameraOnline ? 'pill--ok' : 'pill--offline'}`}>
+      <span className={`pill topbar__camera ${cameraOnline ? 'pill--ok' : 'pill--offline'}`}>
         <span className="pill__dot" />
         CAMERA A · {cameraOnline ? 'LIVE' : 'OFFLINE'}
       </span>
