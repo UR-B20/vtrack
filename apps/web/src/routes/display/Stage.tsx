@@ -1,9 +1,10 @@
-import { formatAge, formatClock, formatConfidence, formatShortClock } from '../../lib/format'
+import { formatAge, formatClock, formatShortClock } from '../../lib/format'
 import { formatPlate } from '../../lib/plates'
-import { RAIL_WORD, type EventRow, type VehiclePublic } from '../../lib/types'
-import { SlabStage } from './SlabStage'
-import { CheckStage } from './CheckStage'
-import type { GuardActionRequest } from './GuardActions'
+import { CheckIcon, CrossIcon, WarnIcon } from '../../lib/icons'
+import { todayAtGate } from '../../lib/status'
+import { RAIL_WORD, VERB, type EventRow, type VehiclePublic } from '../../lib/types'
+import { HOLD } from './displayMachine'
+import { screenLine, toneOf } from './screen'
 
 interface Props {
   event: EventRow | null
@@ -20,8 +21,8 @@ interface Props {
   cacheCount: number
   /** Why the list did not refresh, if it did not. */
   cacheError: string | null
-  onAct: (request: GuardActionRequest) => void
-  onConfirm: (plateNorm: string) => void
+  /** The guard has seen the result for this event. */
+  onOk: (eventId: string) => void
 }
 
 /** How much of the hold window is left, 0–1. */
@@ -30,12 +31,17 @@ function holdProgress(stageSince: number | null, clearAt: number | null, now: nu
   return Math.max(0, Math.min(1, (clearAt - now) / (clearAt - stageSince)))
 }
 
+const ICON = { allow: CheckIcon, deny: CrossIcon, check: WarnIcon }
+
 /**
  * The stage: the vehicle in front of the guard now, refined in place (brief §1).
- * A shell around two very different bodies — see SlabStage and CheckStage.
+ *
+ * One layout for all three screens (screen.ts): plate, one word, one line, and OK — the one
+ * button (owner's call, 13 Oct 2026). OK clears the result once the guard has seen it, so the
+ * next car never pulls up under the last car's colour. TYPE A PLATE stays in the rail.
  */
 export function Stage(props: Props) {
-  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount, cacheError } = props
+  const { event, vehicle, lastReadLocal, clearAt, stageSince, now, lastRead, cacheSyncedAt, cacheCount, cacheError, onOk } = props
 
   if (!event) {
     return (
@@ -43,7 +49,7 @@ export function Stage(props: Props) {
         <div className="stage__head">
           <span>
             {lastRead
-              ? `LAST READ ${formatClock(lastRead.ts)} · ${formatPlate(lastRead.plate_norm ?? '')} · ${RAIL_WORD[lastRead.decision]}`
+              ? `LAST READ ${formatClock(lastRead.ts)} · ${formatPlate(lastRead.plate_norm ?? '')} · ${RAIL_WORD[toneOf(lastRead)]}`
               : 'NO READS YET'}
           </span>
           <span style={cacheError ? { color: 'var(--check)' } : undefined}>
@@ -57,59 +63,47 @@ export function Stage(props: Props) {
           <div className="standby">
             <span className="plate plate--stage" style={{ opacity: 0.28 }}>— — — —</span>
             <h1 className="standby__title">Waiting for vehicle</h1>
-            <span className="standby__sub">WATCHING LANE A · RESULTS APPEAR HERE WITHIN A SECOND</span>
+            <span className="standby__sub">RESULTS APPEAR HERE WITHIN A SECOND</span>
           </div>
         </div>
-
-        <div className="stage__foot">THE LAST FIVE READS STAY IN THE RAIL · TYPE A PLATE TO SEARCH THE LIST</div>
       </section>
     )
   }
 
-  const repaired = Boolean(event.repaired_from)
-  // §5.2: a read between CONF_CHECK and CONF_DECIDE still decides, but says so.
-  const verify = event.decision !== 'check' && event.confidence !== null && event.confidence < 0.85
+  const tone = toneOf(event)
+  const Icon = ICON[tone]
+  // §5.2: a read between CONF_CHECK and CONF_DECIDE still admits, but says so.
+  const verify = tone === 'allow' && event.confidence !== null && event.confidence < 0.85
 
   return (
-    <section className="stage" data-decision={event.decision}>
+    <section className="stage" data-decision={tone}>
       <div className="stage__head">
         <span>
           READ {formatAge(lastReadLocal, now)} AGO
-          {event.read_count > 1 ? ` · ${event.read_count} READS` : ''}
           {event.source === 'manual' ? ' · TYPED BY GUARD' : ''}
         </span>
-        <span>
-          CONFIDENCE {formatConfidence(event.confidence)}
-          {' · '}
-          {event.checksum_ok === false
-            ? (repaired ? 'CHECKSUM FAILED ON RAW READ' : 'CHECKSUM FAILED')
-            : 'CHECKSUM VALID'}
-          {repaired && <span className="badge-verify">REPAIRED</span>}
-          {verify && <span className="badge-verify">VERIFY</span>}
-        </span>
+        {verify && <span className="badge-verify">VERIFY</span>}
       </div>
 
       <div className="stage__body">
-        {event.decision === 'check' ? (
-          <CheckStage event={event} vehicle={vehicle} onAct={props.onAct} onConfirm={props.onConfirm} />
-        ) : (
-          <SlabStage event={event} vehicle={vehicle} onAct={props.onAct} />
-        )}
+        <span className="plate plate--stage">{formatPlate(event.plate_norm ?? event.plate_raw ?? '')}</span>
+        <div className="verb">
+          <Icon className="verb__icon" />
+          <span>{VERB[tone]}</span>
+        </div>
+        <p className="stage__secondary">{screenLine(event, vehicle, todayAtGate())}</p>
       </div>
 
+      <button type="button" className="stage__ok" onClick={() => onOk(event.id)}
+        aria-label={`OK — seen ${formatPlate(event.plate_norm ?? '')} ${VERB[tone]}`}>
+        OK
+      </button>
+
       <div className="stage__foot">
-        {event.decision === 'allow' ? (
-          <>
-            <div className="holdbar" style={{ marginBottom: 12 }}>
-              <div className="holdbar__fill" style={{ width: `${holdProgress(stageSince, clearAt, now) * 100}%` }} />
-            </div>
-            HOLDS WHILE THE CAR IS HERE · CLEARS 5 s AFTER IT LEAVES
-          </>
-        ) : event.decision === 'deny' ? (
-          'HOLDS UNTIL YOU ACT OR THE CAR LEAVES · TURNED AWAY IS ONE TAP · OVERRIDE ASKS FOR A REASON AND IS LOGGED UNDER YOUR NAME'
-        ) : (
-          'HOLDS UNTIL YOU ACT · THE CAR IS STILL IN FRONT OF THE CAMERA, SO A CLEARER FRAME CAN UPGRADE THIS BY ITSELF'
-        )}
+        <div className="holdbar">
+          <div className="holdbar__fill" style={{ width: `${holdProgress(stageSince, clearAt, now) * 100}%` }} />
+        </div>
+        <span>PRESS OK ONCE SEEN · OTHERWISE CLEARS {HOLD.afterLastRead / 1000} s AFTER THE LAST READ</span>
       </div>
     </section>
   )

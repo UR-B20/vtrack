@@ -4,7 +4,7 @@ import { findVehicle, loadVehicles, refreshVehicles, REFRESH_MS, type CachedList
 import { isMuted, playDecision, setMuted, unlockAudio } from '../../lib/sounds'
 import { isDevMode } from '../../lib/router'
 import type { EventRow, VehiclePublic } from '../../lib/types'
-import { clearAt, initialState, reduce, stageEvent, type Action, type MachineState } from './displayMachine'
+import { clearAt, initialState, okTakes, reduce, stageEvent, type Action, type MachineState } from './displayMachine'
 import { useApplyUpdateWhenIdle } from '../../lib/updates'
 import { TopBar } from './TopBar'
 import { Stage } from './Stage'
@@ -12,7 +12,6 @@ import { Rail } from './Rail'
 import { OfflineBanner } from './OfflineBanner'
 import { ManualMode } from './ManualMode'
 import { SimulatePanel } from './SimulatePanel'
-import { storedActor, type GuardActionRequest } from './GuardActions'
 import { useEngineHealth } from '../../lib/useEngineHealth'
 
 /** Drives the hold/clear windows and the "READ n.n s AGO" line. */
@@ -190,32 +189,17 @@ export function DisplayRoute() {
     }
   }, [])
 
-  // ── guard actions ───────────────────────────────────────────────────────
-  const recordAction = useCallback(async (request: GuardActionRequest, eventId: string | null) => {
-    dispatch({ type: 'guard_action' })
-    if (!supabase) return
-    // guard_actions is the one table anon may write (0002_policies.sql) — the audit
-    // trail must survive even when everything else is read-only.
-    await supabase.from('guard_actions').insert({
-      event_id: eventId, action: request.action, reason: request.reason, actor: request.actor,
-    })
-  }, [dispatch])
-
-  const onAct = useCallback(
-    (request: GuardActionRequest) => { void recordAction(request, current?.id ?? null) },
-    [recordAction, current?.id],
-  )
-
-  const onConfirm = useCallback((plateNorm: string) => {
-    // The engine's POST /manual exists from M1 (typed plates are never repaired; a bad check
-    // letter is refused). Wiring CONFIRM to it lands with guard actions + audit in M3 (§8).
-    // Until then, record the confirmation and clear the stage — the guard has decided,
-    // which is what the hold rule is waiting for.
-    void recordAction(
-      { action: 'confirmed', reason: `Confirmed as ${plateNorm}`, actor: storedActor() || null },
-      current?.id ?? null,
-    )
-  }, [recordAction, current?.id])
+  // OK: the guard has seen the result. Back to standby, so the next car never arrives under
+  // the last car's colour. Written to guard_actions (the one table anon may write) as a
+  // record of when the result was seen; a failed write never keeps the result on screen.
+  const onOk = useCallback((id: string) => {
+    const at = Date.now()
+    if (!okTakes(state, id, at)) return
+    dispatch({ type: 'ok', id, now: at })
+    void supabase?.from('guard_actions')
+      .insert({ event_id: id, action: 'confirmed', reason: 'OK on the gate screen', actor: null })
+      .then(() => undefined, () => undefined)
+  }, [state, dispatch])
 
   const onLocalEvent = useCallback(
     (event: EventRow) => dispatch({ type: 'event', event, now: Date.now() }),
@@ -264,8 +248,7 @@ export function DisplayRoute() {
             cacheSyncedAt={cache.syncedAt}
             cacheCount={cache.count}
             cacheError={cache.syncError}
-            onAct={onAct}
-            onConfirm={onConfirm}
+            onOk={onOk}
           />
         )}
       </div>

@@ -87,11 +87,17 @@ describe('hydrate — rail only, never the stage, never a chime', () => {
 })
 
 describe('a vehicle arriving', () => {
-  it('takes the stage and chimes its decision', () => {
-    for (const d of ['allow', 'deny', 'check'] as Decision[]) {
-      const { state, effects } = run([{ type: 'event', event: ev({ decision: d }, 0), now: 0 }])
-      expect(stageEvent(state)?.decision).toBe(d)
-      expect(effects).toEqual([{ type: 'sound', decision: d }])
+  it('takes the stage and chimes its screen: green, red for a foreign plate, orange for the rest', () => {
+    const cases: [Partial<EventRow>, Decision][] = [
+      [{ decision: 'allow' }, 'allow'],
+      [{ decision: 'deny', reason: 'foreign' }, 'deny'],
+      [{ decision: 'deny', reason: 'not_on_list' }, 'check'],
+      [{ decision: 'check', reason: 'low_confidence' }, 'check'],
+    ]
+    for (const [o, tone] of cases) {
+      const { state, effects } = run([{ type: 'event', event: ev(o, 0), now: 0 }])
+      expect(stageEvent(state)?.decision).toBe(o.decision)
+      expect(effects).toEqual([{ type: 'sound', decision: tone }])
     }
   })
 
@@ -150,7 +156,7 @@ describe('the same event again (dedupe, §5.3)', () => {
 describe('a second vehicle', () => {
   it('replaces the stage and pushes the first down the rail', () => {
     const a = ev({ id: 'a', decision: 'allow' }, 0)
-    const b = ev({ id: 'b', decision: 'deny' }, 2000)
+    const b = ev({ id: 'b', decision: 'deny', reason: 'foreign' }, 2000)
     const { state, effects } = run([
       { type: 'event', event: a, now: 0 },
       { type: 'event', event: b, now: 2000 },
@@ -178,30 +184,29 @@ describe('a second vehicle', () => {
   })
 })
 
-describe('hold and clear', () => {
-  it('allow stays at least 8 s even though its read was 5 s ago', () => {
-    const start = run([{ type: 'event', event: ev({ decision: 'allow' }, 0), now: 0 }])
-    expect(clearAt(start.state)).toBe(HOLD.allowMinOnScreen)
-    expect(reduce(start.state, { type: 'tick', now: 7_999 }).state.stageId).not.toBeNull()
-    expect(reduce(start.state, { type: 'tick', now: 8_000 }).state.stageId).toBeNull()
+describe('hold and clear (30 s after the last read, owner 13 Oct 2026)', () => {
+  it.each(['allow', 'deny', 'check'] as Decision[])('%s holds 30 s after its last read', (d) => {
+    const start = run([{ type: 'event', event: ev({ decision: d }, 0), now: 0 }])
+    expect(clearAt(start.state)).toBe(HOLD.afterLastRead)
+    expect(reduce(start.state, { type: 'tick', now: 29_999 }).state.stageId).not.toBeNull()
+    expect(reduce(start.state, { type: 'tick', now: 30_000 }).state.stageId).toBeNull()
   })
 
-  it('allow clears 5 s after the last read once it has had its 8 s', () => {
+  it('a new read of the same car restarts the 30 s', () => {
     const e = ev({ id: 'x', decision: 'allow' }, 0)
     const start = run([
       { type: 'event', event: e, now: 0 },
-      { type: 'event', event: { ...e, read_count: 2 }, now: 6_000 },   // still being read at 6 s
+      { type: 'event', event: { ...e, read_count: 2 }, now: 6_000 },
     ])
-    expect(clearAt(start.state)).toBe(11_000)                          // 6 000 + 5 000
-    expect(reduce(start.state, { type: 'tick', now: 10_999 }).state.stageId).not.toBeNull()
-    expect(reduce(start.state, { type: 'tick', now: 11_000 }).state.stageId).toBeNull()
+    expect(clearAt(start.state)).toBe(36_000)
   })
 
-  it.each(['deny', 'check'] as Decision[])('%s holds for 15 s after the last read', (d) => {
-    const start = run([{ type: 'event', event: ev({ decision: d }, 0), now: 0 }])
-    expect(clearAt(start.state)).toBe(HOLD.denyCheckAfterLastRead)
-    expect(reduce(start.state, { type: 'tick', now: 14_999 }).state.stageId).not.toBeNull()
-    expect(reduce(start.state, { type: 'tick', now: 15_000 }).state.stageId).toBeNull()
+  it('the next vehicle replaces the result at once', () => {
+    const start = run([
+      { type: 'event', event: ev({ id: 'a', decision: 'allow' }, 0), now: 0 },
+      { type: 'event', event: ev({ id: 'b', decision: 'check' }, 2000), now: 2000 },
+    ])
+    expect(start.state.stageId).toBe('b')
   })
 
   it('a car that keeps being read keeps its result on screen', () => {
@@ -211,13 +216,12 @@ describe('hold and clear', () => {
       state = reduce(state, { type: 'tick', now: t }).state
       expect(state.stageId).toBe('x')
     }
-    // Then it drives off and the reads stop.
-    expect(reduce(state, { type: 'tick', now: 60_000 + 15_000 }).state.stageId).toBeNull()
+    expect(reduce(state, { type: 'tick', now: 60_000 + 30_000 }).state.stageId).toBeNull()
   })
 
   it('clearing leaves the rail intact — standby still shows the last read', () => {
     const start = run([{ type: 'event', event: ev({ decision: 'allow' }, 0), now: 0 }])
-    const cleared = reduce(start.state, { type: 'tick', now: 20_000 }).state
+    const cleared = reduce(start.state, { type: 'tick', now: 40_000 }).state
     expect(cleared.stageId).toBeNull()
     expect(cleared.rail).toHaveLength(1)
   })
@@ -230,47 +234,76 @@ describe('hold and clear', () => {
   })
 })
 
+describe('OK — the guard has seen it (owner, 13 Oct 2026)', () => {
+  const green = ev({ id: 'g', decision: 'allow' }, 0)
+  const seen = (now = 2_000) => run([
+    { type: 'event', event: green, now: 0 },
+    { type: 'ok', id: 'g', now },
+  ])
+
+  it('clears the result at once, leaving it in the rail', () => {
+    const { state, effects } = seen()
+    expect(state.stageId).toBeNull()
+    expect(state.rail[0]?.id).toBe('g')
+    expect(effects).toEqual([{ type: 'sound', decision: 'allow' }])   // the arrival's chime only
+  })
+
+  it('a re-read of the same car does not bring it back, and does not chime', () => {
+    const reread = { ...green, read_count: 2, last_read_at: serverTs(5_000) }
+    const { state, effects } = run([{ type: 'event', event: reread, now: 5_000 }], seen().state)
+    expect(state.stageId).toBeNull()
+    expect(state.rail[0]?.read_count).toBe(2)
+    expect(effects).toEqual([])
+  })
+
+  it('nor does a reconnect followed by a re-read', () => {
+    const after = run([
+      { type: 'hydrate', events: [green] },
+      { type: 'event', event: { ...green, read_count: 3 }, now: 9_000 },
+    ], seen().state)
+    expect(after.state.stageId).toBeNull()
+  })
+
+  it('the next car still takes the stage and chimes', () => {
+    const red = ev({ id: 'r', decision: 'deny', reason: 'foreign' }, 6_000)
+    const { state, effects } = run([{ type: 'event', event: red, now: 6_000 }], seen().state)
+    expect(state.stageId).toBe('r')
+    expect(effects).toEqual([{ type: 'sound', decision: 'deny' }])
+  })
+
+  it('a tap meant for the last car cannot clear the next car as it appears', () => {
+    const red = ev({ id: 'r', decision: 'deny', reason: 'foreign' }, 6_000)
+    const start = run([
+      { type: 'event', event: green, now: 0 },
+      { type: 'event', event: red, now: 6_000 },
+    ])
+    // Pressed on the green, landing after the red took the stage.
+    expect(reduce(start.state, { type: 'ok', id: 'g', now: 6_100 }).state.stageId).toBe('r')
+    // Pressed on the red itself, but inside its first second.
+    expect(reduce(start.state, { type: 'ok', id: 'r', now: 6_000 + HOLD.okGrace - 1 }).state.stageId).toBe('r')
+    expect(reduce(start.state, { type: 'ok', id: 'r', now: 6_000 + HOLD.okGrace }).state.stageId).toBeNull()
+  })
+
+  it('does nothing in standby', () => {
+    const { state } = run([{ type: 'ok', id: 'g', now: 5_000 }])
+    expect(state).toEqual(initialState)
+  })
+})
+
 describe('clock skew — the timers must ignore the server clock entirely', () => {
   for (const skew of [-60_000, 0, 60_000]) {
-    it(`deny still holds exactly 15 s with a ${skew / 1000}s skew`, () => {
-      // Server timestamps are an hour out in either direction; the reducer must not care.
+    it(`a result still holds exactly 30 s with a ${skew / 1000}s skew`, () => {
       const e = ev({ decision: 'deny' }, 0, skew)
       const start = run([{ type: 'event', event: e, now: 0 }])
-      expect(reduce(start.state, { type: 'tick', now: 14_900 }).state.stageId).not.toBeNull()
-      expect(reduce(start.state, { type: 'tick', now: 15_100 }).state.stageId).toBeNull()
-    })
-
-    it(`allow still gets its 8 s with a ${skew / 1000}s skew`, () => {
-      const e = ev({ decision: 'allow' }, 0, skew)
-      const start = run([{ type: 'event', event: e, now: 0 }])
-      expect(reduce(start.state, { type: 'tick', now: 7_900 }).state.stageId).not.toBeNull()
-      expect(reduce(start.state, { type: 'tick', now: 8_100 }).state.stageId).toBeNull()
+      expect(reduce(start.state, { type: 'tick', now: 29_900 }).state.stageId).not.toBeNull()
+      expect(reduce(start.state, { type: 'tick', now: 30_100 }).state.stageId).toBeNull()
     })
   }
 
   it('a server timestamp far in the future does not pin the stage forever', () => {
     const e = ev({ decision: 'check' }, 0, 86_400_000)   // last_read_at a day ahead
     const start = run([{ type: 'event', event: e, now: 0 }])
-    expect(reduce(start.state, { type: 'tick', now: 15_001 }).state.stageId).toBeNull()
-  })
-})
-
-describe('guard actions', () => {
-  it.each(['deny', 'check'] as Decision[])('clear a %s immediately', (d) => {
-    const start = run([{ type: 'event', event: ev({ decision: d }, 0), now: 0 }])
-    const { state } = run([{ type: 'guard_action' }], start.state)
-    expect(state.stageId).toBeNull()
-    expect(state.rail).toHaveLength(1)      // the audit trail stays on screen
-  })
-
-  it('do not cut an allow short', () => {
-    const start = run([{ type: 'event', event: ev({ decision: 'allow' }, 0), now: 0 }])
-    const { state } = run([{ type: 'guard_action' }], start.state)
-    expect(state.stageId).not.toBeNull()
-  })
-
-  it('are a no-op in standby', () => {
-    expect(run([{ type: 'guard_action' }]).state).toEqual(initialState)
+    expect(reduce(start.state, { type: 'tick', now: 30_001 }).state.stageId).toBeNull()
   })
 })
 
@@ -280,7 +313,6 @@ describe('purity', () => {
     const snapshot = JSON.parse(JSON.stringify(before))
     reduce(before, { type: 'event', event: ev({ id: 'b' }, 1000), now: 1000 })
     reduce(before, { type: 'tick', now: 99_999 })
-    reduce(before, { type: 'guard_action' })
     expect(before).toEqual(snapshot)
   })
 })

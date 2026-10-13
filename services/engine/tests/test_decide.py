@@ -112,12 +112,21 @@ class TestListDecisions:
 
 
 class TestRepair:
-    def test_repaired_and_on_the_list_allows(self, vehicles):
+    def test_repaired_and_on_the_list_is_check_never_allow(self, vehicles):
+        # Owner's call, 13 Oct 2026: a corrected read never admits on its own. SBA 1234 6 is
+        # one character from the approved SBA 1234 G — the guard must look.
         i, v = run("SNB953BE", 0.95, vehicles)
-        assert (i.plate_norm, i.repaired_from, v.decision) == ("SNB9538E", "SNB953BE", "allow")
+        assert (i.plate_norm, i.repaired_from) == ("SNB9538E", "SNB953BE")
+        assert (v.decision, v.reason) == ("check", "ambiguous")
+        _, v = run("SBA 1234 6", 0.95, vehicles)
+        assert (v.decision, v.reason) == ("check", "ambiguous")
+
+    def test_repaired_but_suspended_or_expired_is_still_deny(self, vehicles):
+        _, v = run("SLM3O90J", 0.95, vehicles)                 # SLM3090J is suspended
+        assert (v.decision, v.reason) == ("deny", "suspended")
 
     def test_checksum_ok_records_the_raw_read(self, vehicles):
-        # Stage.tsx renders "CHECKSUM FAILED ON RAW READ" from exactly this pair.
+        # The display's "Camera read … · check the plate" line comes from repaired_from.
         i, _ = run("SNB953BE", 0.95, vehicles)
         assert (i.checksum_ok, i.plate_kind) == (False, "civilian")
 

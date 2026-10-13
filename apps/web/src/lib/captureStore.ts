@@ -2,12 +2,13 @@
  * captureStore.ts — what /capture keeps in this tablet's storage between page loads: AUTO
  * or TAP, the presence tuning set at the gate, and the empty-lane background (so a reload
  * with a car already in the lane still reads it — presence.ts, decision 3), and the camera's
- * zoom (zoom.ts). The lane ROI itself is in roi.ts. Parsers are pure; storage failures degrade to defaults.
+ * zoom (zoom.ts), and which camera to use (cameras.ts). The lane ROI itself is in roi.ts. Parsers are pure; storage failures degrade to defaults.
  */
 
 import { DEFAULT_CONFIG, SAMPLE_CELLS, type PresenceConfig } from './presence'
 import type { Roi } from './roi'
 import { parseZoom } from './zoom'
+import { parseCameraId } from './cameras'
 
 export type CaptureMode = 'auto' | 'tap'
 
@@ -34,11 +35,14 @@ export function parseTuning(raw: string | null): Tuning {
   return out
 }
 
-/** Which ROI, on which camera shape and at which zoom, a background describes. At 1× (or a
- *  camera without zoom) the signature is the one stored before zoom existed. */
-export function roiSignature(roi: Roi, aspect: number, zoom = 1): string {
-  const base = [roi.x, roi.y, roi.w, roi.h, aspect].map((n) => n.toFixed(3)).join(',')
-  return Math.abs(zoom - 1) < 1e-3 ? base : `${base},z${zoom.toFixed(2)}`
+/** Which ROI, on which camera shape, at which zoom and from which chosen camera, a background
+ *  describes. At 1× (or a camera without zoom), with the browser's own camera, the signature
+ *  is the one stored before zoom and the camera choice existed. */
+export function roiSignature(roi: Roi, aspect: number, zoom = 1, camera: string | null = null): string {
+  let sig = [roi.x, roi.y, roi.w, roi.h, aspect].map((n) => n.toFixed(3)).join(',')
+  if (Math.abs(zoom - 1) >= 1e-3) sig += `,z${zoom.toFixed(2)}`
+  if (camera) sig += `,c${camera.slice(0, 16)}`
+  return sig
 }
 
 export function parseBackground(raw: string | null, signature: string): Float32Array | null {
@@ -63,6 +67,7 @@ const KEY = {
   background: 'vtrack:capture:background',
   saveFrames: 'vtrack:capture:save-frames',
   zoom: 'vtrack:capture:zoom',
+  camera: 'vtrack:capture:camera',
 } as const
 
 function read(key: string): string | null {
@@ -92,4 +97,6 @@ export const store = {
   setSaveFrames: (on: boolean) => write(KEY.saveFrames, on ? '1' : null),
   zoom: (): number | null => parseZoom(read(KEY.zoom)),
   setZoom: (z: number) => write(KEY.zoom, String(z)),
+  camera: (): string | null => parseCameraId(read(KEY.camera)),
+  setCamera: (id: string | null) => write(KEY.camera, id),
 }

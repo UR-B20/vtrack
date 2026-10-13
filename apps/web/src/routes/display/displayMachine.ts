@@ -1,7 +1,7 @@
 /**
  * displayMachine.ts — the gate display's state machine (CLAUDE.md §6.1, brief §4.5).
  *
- *   STANDBY ──event──▶ ALLOW | DENY | CHECK ──hold expires | next vehicle | guard acts──▶ STANDBY
+ *   STANDBY ──event──▶ GREEN | ORANGE | RED ──OK | hold expires | next vehicle──▶ STANDBY
  *                            ▲ │ UPDATE on the same event (dedupe) re-renders in place
  *
  * Pure: a reducer over values, returning the next state plus the effects the component
@@ -28,15 +28,19 @@
  */
 
 import type { Decision, EventRow } from '../../lib/types'
+import { toneOf } from './screen'
 
-/** Hold/clear windows from §6.1. Milliseconds. */
+/**
+ * How long a result stays up. Owner's call, 13 Oct 2026 (CLAUDE.md §11, Gate screen): every
+ * result — green, orange or red — holds this long after its last read, unless the guard
+ * presses OK first, and the next vehicle replaces it at once. Milliseconds.
+ *
+ * `okGrace`: OK is ignored for this long after a result takes the stage, so a tap meant for
+ * the car before cannot clear the next car's red as it appears.
+ */
 export const HOLD = {
-  /** allow clears this long after the last read... */
-  allowAfterLastRead: 5_000,
-  /** ...but never before it has been on screen this long. */
-  allowMinOnScreen: 8_000,
-  /** deny and check hold until the guard acts, the next vehicle arrives, or this. */
-  denyCheckAfterLastRead: 15_000,
+  afterLastRead: 30_000,
+  okGrace: 1_000,
 } as const
 
 export const RAIL_SIZE = 5
@@ -50,10 +54,12 @@ export interface MachineState {
    * (gate-standby.png still highlights the 14:32:06 read).
    */
   stageId: string | null
-  /** Local ms when this event first took the stage. Feeds allowMinOnScreen. */
+  /** Local ms when this event first took the stage. Feeds the hold bar. */
   stageSince: number | null
   /** Local ms of the most recent read for the staged event. Feeds every hold window. */
   stageLastReadLocal: number | null
+  /** The last event the guard pressed OK on. A later re-read of it stays in the rail. */
+  okId: string | null
 }
 
 export type Action =
@@ -63,9 +69,10 @@ export type Action =
   | { type: 'event'; event: EventRow; now: number }
   /** Drives the hold/clear windows. */
   | { type: 'tick'; now: number }
-  /** The guard pressed LET THROUGH / TURNED AWAY — clears deny and check at once. */
-  | { type: 'guard_action' }
+  /** The guard pressed OK on the result for event `id`: they have seen it. */
+  | { type: 'ok'; id: string; now: number }
 
+/** `decision` is the screen's tone (screen.ts), which picks the chime. */
 export type Effect = { type: 'sound'; decision: Decision }
 
 export interface Step {
@@ -74,7 +81,7 @@ export interface Step {
 }
 
 export const initialState: MachineState = {
-  rail: [], stageId: null, stageSince: null, stageLastReadLocal: null,
+  rail: [], stageId: null, stageSince: null, stageLastReadLocal: null, okId: null,
 }
 
 /** Ordering key: `ts`, with the id as a stable tiebreak for same-millisecond inserts.
@@ -106,15 +113,7 @@ export function clearAt(state: MachineState): number | null {
   if (state.stageId === null || state.stageLastReadLocal === null) return null
   const staged = state.rail.find((e) => e.id === state.stageId)
   if (!staged) return null
-
-  if (staged.decision === 'allow') {
-    return Math.max(
-      state.stageLastReadLocal + HOLD.allowAfterLastRead,
-      (state.stageSince ?? state.stageLastReadLocal) + HOLD.allowMinOnScreen,
-    )
-  }
-  // deny and check hold longer — the guard has to act, or the car has to leave.
-  return state.stageLastReadLocal + HOLD.denyCheckAfterLastRead
+  return state.stageLastReadLocal + HOLD.afterLastRead
 }
 
 /** The event currently on the stage, or null in standby. */
@@ -123,12 +122,18 @@ export function stageEvent(state: MachineState): EventRow | null {
   return state.rail.find((e) => e.id === state.stageId) ?? null
 }
 
+/** Whether OK pressed now on event `id` clears it: only the result it was pressed on, and
+ *  not in the first moment of a new one (HOLD.okGrace). */
+export function okTakes(state: MachineState, id: string, now: number): boolean {
+  return state.stageId === id && state.stageSince !== null && now - state.stageSince >= HOLD.okGrace
+}
+
 export function reduce(state: MachineState, action: Action): Step {
   switch (action.type) {
     case 'hydrate': {
       // Rail only. See note 2 at the top of this file.
       return {
-        state: { ...initialState, rail: sortRail(action.events) },
+        state: { ...initialState, okId: state.okId, rail: sortRail(action.events) },
         effects: [],
       }
     }
@@ -146,25 +151,27 @@ export function reduce(state: MachineState, action: Action): Step {
             rail: upsertRail(state.rail, event),
             stageLastReadLocal: now,
           },
-          // A check that has become an allow is the upgrade the guard needs to hear.
-          effects: event.decision !== current.decision ? [{ type: 'sound', decision: event.decision }] : [],
+          // An orange that has become a green is the upgrade the guard needs to hear.
+          effects: toneOf(event) !== toneOf(current) ? [{ type: 'sound', decision: toneOf(event) }] : [],
         }
       }
 
-      // Older than what is on the stage (a buffered retry landing late): rail only.
-      if (current && !isNewer(event, current)) {
+      // Older than what is on the stage (a buffered retry landing late), or a re-read of a
+      // car the guard already pressed OK on: rail only.
+      if ((current && !isNewer(event, current)) || event.id === state.okId) {
         return { state: { ...state, rail: upsertRail(state.rail, event) }, effects: [] }
       }
 
       // A new vehicle takes the stage; the previous one stays in the rail.
       return {
         state: {
+          ...state,
           rail: upsertRail(state.rail, event),
           stageId: event.id,
           stageSince: now,
           stageLastReadLocal: now,
         },
-        effects: [{ type: 'sound', decision: event.decision }],
+        effects: [{ type: 'sound', decision: toneOf(event) }],
       }
     }
 
@@ -174,12 +181,12 @@ export function reduce(state: MachineState, action: Action): Step {
       return { state: { ...state, stageId: null, stageSince: null, stageLastReadLocal: null }, effects: [] }
     }
 
-    case 'guard_action': {
-      // §6.1: deny/check hold "until a guard action". Allow is not actionable, so a
-      // stray action must not cut its minimum time on screen short.
-      const staged = stageEvent(state)
-      if (!staged || staged.decision === 'allow') return { state, effects: [] }
-      return { state: { ...state, stageId: null, stageSince: null, stageLastReadLocal: null }, effects: [] }
+    case 'ok': {
+      if (!okTakes(state, action.id, action.now)) return { state, effects: [] }
+      return {
+        state: { ...state, stageId: null, stageSince: null, stageLastReadLocal: null, okId: action.id },
+        effects: [],
+      }
     }
   }
 }

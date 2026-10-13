@@ -76,7 +76,7 @@ export const VERB: Record<Decision, string> = {
 export const RAIL_WORD: Record<Decision, string> = {
   allow: 'ALLOWED',
   deny: 'DENIED',
-  check: 'CHECK',
+  check: 'VERIFY',
 }
 
 /** Headline for the reason line under the verb. */

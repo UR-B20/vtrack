@@ -10,8 +10,8 @@ Two phases, because the vehicle lookup depends on which plate we think we read:
 The overriding rule is §1's: never a confident wrong green. When unsure, return check.
 
 Pinned against the M0 gate display, which renders exactly these fields:
-  • checksum_ok records the RAW read. Stage.tsx shows "CHECKSUM FAILED ON RAW READ" from
-    checksum_ok=false together with repaired_from.
+  • checksum_ok records the RAW read, and repaired_from what the camera read before repair.
+    The display (screen.ts) shows "Camera read <repaired_from> · check the plate" from it.
   • A NULL valid_from / valid_until is an open bound, as in apps/web/src/lib/status.ts.
   • `verify` exists only in the API response; `events` has no flags column, and the display
     derives its VERIFY badge from the stored confidence.
@@ -41,6 +41,12 @@ And one guard the spec does not have, which only ever turns a DENY into a CHECK:
   the read itself is not on the list and that completion IS, the answer is CHECK
   ("ambiguous"), with the completed plate as the best guess. Never a green: a genuinely
   foreign plate (Sabah plates also start with S) must not be allowed on an SG row.
+
+A corrected read is never a green (owner's call, 13 Oct 2026): a repaired read whose plate is
+on the list is CHECK `ambiguous`, not ALLOW. A plate one confusable character away from an
+approved one (SBA 1234 6 → SBA1234G) would otherwise put up PROCEED for a car that does not
+carry the approved plate. The guard looks; a later clean read of the real plate still
+upgrades the event to ALLOW (dedupe.py).
 
 Foreign plates (owner's call, 8 Oct 2026): only Singapore plates are admitted. A confident
 `foreign` read is DENY, reason `foreign`, whatever the list says — a foreign row on the
@@ -198,4 +204,7 @@ def decide(interp: Interpretation, vehicle: VehicleRow | None, today: date,
         vehicle.valid_until is not None and today > vehicle.valid_until
     ):
         return Verdict("deny", "expired", verify)
+    # A corrected read never admits on its own (module docstring).
+    if interp.repaired_from:
+        return Verdict("check", "ambiguous")
     return Verdict("allow", None, verify)

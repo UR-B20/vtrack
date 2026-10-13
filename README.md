@@ -1,10 +1,10 @@
 # VTrack
 
-A tablet camera at **point A** reads licence plates of vehicles that stop at the guard at **point B**. The VTrack Engine recognises the plate, validates the Singapore checksum, matches it against the approved-vehicle list and writes one event. Supabase pushes that event to the gate display, where the guard sees `ALLOW`, `DENY` or `CHECK` within about a second.
+A camera at **point A** reads licence plates of vehicles that stop at the guard at **point B**. The VTrack Engine recognises the plate, validates the Singapore checksum, matches it against the approved-vehicle list and writes one event. Supabase pushes that event to the gate display, a phone at B, where the guard sees green **PROCEED**, orange **VERIFY MANUALLY** or, for a foreign plate, red **DO NOT ALLOW** within about a second.
 
 Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build contract is [`CLAUDE.md`](CLAUDE.md).
 
-**Every device is on its own mobile data — there is no LAN, no laptop at the site and no tunnel.**
+**Every device reaches the engine and Supabase over public HTTPS on its own connection — there is no LAN, no server at the site and no tunnel.**
 
 ---
 
@@ -16,6 +16,8 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 - **Stage A (live):** the engine runs as one always-on container on Render (Singapore), built from [`render.yaml`](render.yaml).
 - **Stage B:** `/capture` for the tablet at A, per `docs/screens/capture.png` — a lane ROI, presence gating that sends frames only while a vehicle is in the lane, QR pairing and a screen lock.
 - **Left in M2:** the run at the gate (STOP 2). There is no benchmark and no IR camera: the gate is lit at all hours, so a night read is a lit read (CLAUDE.md §11, 4 Oct 2026).
+
+**13 Oct 2026:** B is a phone in portrait with three screens (green, orange, red for foreign plates only) and one OK button; A is a desktop with a video capture card (CLAUDE.md §11).
 
 M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
@@ -144,7 +146,7 @@ apps/web/src/
   lib/cache.ts       IndexedDB snapshot of vehicles_public, refreshed every 5 min
   lib/sounds.ts      Web Audio chimes, no files
   routes/display/displayMachine.ts   the pure state machine
-  routes/display/…   TopBar · Stage → SlabStage | CheckStage · Rail · ManualMode · OfflineBanner
+  routes/display/…   TopBar · Stage (screen.ts: which of the three screens) · Rail · ManualMode · OfflineBanner
   routes/admin/…     VehiclesTable · VehicleDrawer · csv.ts
   routes/capture/…   CaptureRoute · PairDevice · CameraView (+ parts, ScreenLock, DevPanel, grab, useCamera) · readView.ts
   lib/presence.ts    when the camera sends a frame (pure; presence.test.ts)
@@ -173,9 +175,9 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 
 **The approved screen names the owner, as the canvas does.** Under PROCEED: "Tan Wei Ming · HQ Coy · Permanent pass · valid to 31 Dec 2026". M0 showed only "On the approved list", because owner names are personal data (brief §3.10) and the gate screen can be read from outside the post; the owner chose the details (24 Sep 2026). Mount the screen at B facing the guard, not the lane.
 
-**One deliberate departure from the canvas.** In `gate-check.png` the rail chip for the 14:25:40 event shows the raw read `SNB 953B E`, while `gate-allowed.png` shows the same event as the repaired `SNB 9538 E`. We render the best guess (`plate_norm`) everywhere; the raw read appears only in the CHECK stage's "what the camera saw" panel.
+**Three screens, mapped from the engine's answer** (owner, 13 Oct 2026; `routes/display/screen.ts`). Green PROCEED for `allow`. Red DO NOT ALLOW only for a foreign plate. Orange VERIFY MANUALLY for everything else: not on the list, expired, suspended, a corrected read, an unclear read. All three use the same layout, with one line under the verb saying why. The engine still stores its own decision and reason; only the screen groups them.
 
-**TURNED AWAY is one tap; LET THROUGH is not.** Turning a vehicle away is the guard agreeing with a decision the system already made, so there is nothing to justify, and putting a form in front of the correct action is how you train people to stop using it. The row is still written to `guard_actions`. Letting a denied vehicle through is the override, and that one asks for a reason and a name (§3.10).
+**One button: OK.** The guard decides at the gate and the screen only informs, so overrides are not recorded. OK says "I have seen it": the screen goes back to *Waiting for vehicle*, so the next car never pulls up under the last car's green, and the time is written to `guard_actions`. OK is ignored for a second after a new result appears, so a tap meant for one car cannot clear the next car's red. Without OK, a result stays up 30 s after the vehicle's last read; the next vehicle always replaces it at once.
 
 ### The engine's decisions worth knowing
 
@@ -184,6 +186,8 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 **Dedupe keys on `(site, lane, plate_norm)`, never "the latest event in the lane".** Otherwise an allowed car pulling away while a denied car sits at the guard would insert a newer event and take the stage: a green over a red.
 
 **A dropped check letter asks; it does not deny.** Through a webcam the real model once read a clear `SNB 9538 E` as `SNB9538` at 0.997. Without its letter that is the shape §5.1 calls *foreign*, which is never repaired — a confident DENY for an approved car. A Singapore check letter is determined by the rest of the plate, so when the read is not on the list but its one completion is, the answer is CHECK with the completion as the best guess. Never ALLOW: Sabah plates also begin with S.
+
+**A corrected read is never a green.** A read that matches the list only after a confusable swap (`SBA 1234 6` → `SBA 1234 G`) or a completed check letter is CHECK, and the screen shows what the camera actually read. A Malaysian plate one character away from an approved one must not repair its way to PROCEED.
 
 **An `invalid` read is offered to repair.** Every repair example in §5.1 breaks the pattern rather than the checksum, so read literally §5.2 would never repair them. `STRICT_SPEC_REPAIR` in `decide.py` restores the literal reading.
 
@@ -240,11 +244,21 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 
 **Where to look:** Render → the service → **Logs**. The engine logs readiness changes and nothing else — no plates, no tokens (§5.5).
 
-### The tablets at the gate (M2)
+### The devices at the gate
 
 **Before you go:** if you ever ran `supabase/dev/simulate_policy.sql`, run `supabase/dev/simulate_policy_down.sql` now.
 
-**Tablet A (the camera)** — a phone works the same way: the page is designed in portrait.
+**A on a desktop with a capture card** — the set-up in use from 13 Oct 2026. Do this first, then steps 5–8 below.
+1. Show the camera's picture full screen on the device that has it, and mirror that screen into the capture card. Plug the card's USB into the desktop. Keep that screen awake, with notifications off: anything that appears inside the lane box looks like a vehicle.
+2. Close any other app that uses the card (OBS, the card's own viewer). Only one app can hold it.
+3. In Chrome on the desktop, open **https://ur-b20.github.io/vtrack/capture?dev=1** and allow the camera.
+4. **Pair it** with **TYPE THE TOKEN INSTEAD** (Chrome on Windows cannot scan the QR code): device `cam-a`, token the `cam-a` value of `DEVICE_TOKENS` in `services/engine/.env`. Never paste it anywhere else.
+5. **Unlock:** hold the bottom bar with the mouse for 2 s.
+6. In the dev panel, **CAMERA** → pick the capture card (often *USB Video* or the card's name). The desktop remembers it. If the card is unplugged, the page falls back to the desktop's own camera, so check the picture after any restart.
+7. Keep the mirrored screen's clock, battery and buttons out of the lane box. Use the source's own zoom: a capture card offers none.
+8. Set the desktop never to sleep and never to turn the screen off.
+
+**A on a phone** — the page is designed in portrait.
 1. Turn **auto-rotate off**. Mount the tablet facing the vehicles as they arrive: queued cars then sit further back and look smaller, and motorcycles show their front number sticker.
 2. In Chrome, open **https://ur-b20.github.io/vtrack/capture?dev=1** on mobile data. `?dev=1` shows the setup panel; drop it once set up.
 3. **Pair it.**
@@ -264,9 +278,16 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
    - If a vehicle is missed, lower **PRESENT AT**. If shadows or headlights count as vehicles, raise it.
 9. **Pin the screen** so the page can't be left: Android **Settings → Security → App pinning** (the name varies by model) → on. Then, from Recents, tap Chrome's icon → **Pin**.
 
-**Tablet B (the guard's screen):** open **https://ur-b20.github.io/vtrack/display**. The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
+**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. Mount it facing the guard, not the lane: the green screen names the owner.
+- Green **PROCEED**: on the list and valid.
+- Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
+- Red **DO NOT ALLOW**: a foreign plate.
+- Press **OK** once you have seen the result: the screen goes back to *Waiting for vehicle*. Without OK it stays 30 s after the last read. The next vehicle always replaces it. **TYPE A PLATE** searches the list by hand.
+- The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
 
 **Saving frames, to look into a missed read.** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):
 - turn off cloud backup of Downloads (Samsung Cloud / Google Photos);
 - move them to the laptop by USB, into a folder **outside** the repository and outside OneDrive;
 - delete them from the tablet, including its Trash.
+
+On the desktop at A they go to its Downloads folder; the same rules apply.
