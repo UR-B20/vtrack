@@ -2,7 +2,7 @@
  * CameraView — the camera screen at point A (CLAUDE.md §6.2, docs/screens/capture.png).
  *
  * The pieces, and where each rule lives:
- *   useCamera.ts        the rear camera and its resolution
+ *   useCamera.ts        the rear camera (or the chosen one) and its resolution
  *   lib/roi.ts          the lane ROI: what the engine is sent
  *   grab.ts             the 64×36 thumbnail (4 Hz) and the full-resolution ROI crop
  *   lib/presence.ts     WHEN to send: presence + motion, sessions, the 12-frame cap
@@ -63,7 +63,7 @@ interface Shown {
 
 export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   const dev = useMemo(isDevMode, [])
-  const { videoRef, camera, zoom, setZoom } = useCamera()
+  const { videoRef, camera, zoom, setZoom, cameras, cameraId, chosenCamera, chooseCamera } = useCamera()
   const health = useEngineHealth(engineUrl)
   const stageRef = useRef<HTMLDivElement>(null)
   const [viewSize, setViewSize] = useState<Size>({ width: 0, height: 0 })
@@ -82,8 +82,9 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
   }, [aspect]) // eslint-disable-line react-hooks/exhaustive-deps
   const roi = stored?.roi ?? null
   const rect = useMemo(() => (size && roi ? roiPixels(roi, size) : null), [size, roi])
-  // Zooming changes what the box shows: the empty-lane picture is per zoom too.
-  const signature = roi && aspect ? roiSignature(roi, aspect, zoom?.value ?? 1) : null
+  // Zooming or another camera changes what the box shows: the empty-lane picture is per
+  // zoom and per chosen camera too.
+  const signature = roi && aspect ? roiSignature(roi, aspect, zoom?.value ?? 1, chosenCamera) : null
 
   // ── presence ──────────────────────────────────────────────────────────────────────
   const [tuning, setTuning] = useState<Tuning>(store.tuning)
@@ -292,6 +293,12 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
     setZoom(value)
     if (stored?.plateBand) setBand(null)
   }
+  // Another camera sees the lane from elsewhere: the same, and its ROI is per frame shape.
+  const changeCamera = (id: string | null) => {
+    if (id === chosenCamera) return
+    if (stored?.plateBand) setBand(null)
+    chooseCamera(id)
+  }
 
   const shownRoi = draft ?? roi
   const lastBand = shown?.result.bbox ? bandFromBox(shown.result.bbox, shown.sent.width) : null
@@ -327,6 +334,7 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
             onSetBand={() => setBand(lastBand)} onClearBand={() => setBand(null)}
             onCalibrate={() => dispatch({ type: 'calibrate' })}
             zoom={zoom} onZoom={changeZoom}
+            cameras={cameras} cameraId={cameraId} chosenCamera={chosenCamera} onCamera={changeCamera}
             saveFrames={saveFrames} onSaveFrames={(on) => { setSaveFramesState(on); store.setSaveFrames(on) }} />
         )}
       </div>

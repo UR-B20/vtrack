@@ -21,8 +21,8 @@ about 0.16% of valid plates have a valid confusable twin (SNB991M / SN8991M), so
 real multi-frame data to design safely rather than a guess.
 
 On a match, one of three things happens, and read-derived columns are only ever adopted
-together — never a new confidence beside an old checksum, which would render
-"CHECKSUM FAILED ON RAW READ" on a clean PROCEED:
+together — never a new confidence beside an old checksum or repair, which would put
+one read's numbers under another read's plate:
 
     existing check,  new read decides           → adopt the new read wholesale (§5.3 upgrade)
     same decision,   new read more confident    → adopt the new read wholesale

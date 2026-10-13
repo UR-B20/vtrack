@@ -4,11 +4,12 @@ import type { PresenceState } from '../../lib/presence'
 import { TUNING_LIMITS, type Tuning } from '../../lib/captureStore'
 import { roiQuality, type PlateBand, type Roi } from '../../lib/roi'
 import type { CameraZoom } from './useCamera'
+import type { CameraChoice } from '../../lib/cameras'
 
 /**
  * ?dev=1 only — the setup panel used at the gate (STOP 2), never shown to the guard:
  * live presence/motion levels against their thresholds, the thresholds themselves, the
- * camera and ROI resolution, the camera's zoom, the plate-size calibration, re-calibrating
+ * camera and ROI resolution, which camera (a capture card on a desktop), the camera's zoom, the plate-size calibration, re-calibrating
  * the empty lane, and saving every frame sent, to see what the camera saw when a vehicle was
  * missed.
  */
@@ -25,6 +26,10 @@ export function DevPanel(props: {
   onCalibrate: () => void
   zoom: CameraZoom | null
   onZoom: (value: number) => void
+  cameras: CameraChoice[]
+  cameraId: string | null
+  chosenCamera: string | null
+  onCamera: (id: string | null) => void
   saveFrames: boolean
   onSaveFrames: (on: boolean) => void
 }) {
@@ -75,6 +80,16 @@ export function DevPanel(props: {
         {p.inFlight && (p.session?.rechecking ? ' · RE-READING' : ' · IN FLIGHT')}
       </div>
       <div className="mono capdev__line">SEEN {p.seen ?? '—'}</div>
+      {props.cameras.length > 1 && (
+        <label className="capdev__slider">
+          <span>CAMERA</span>
+          <select className="capdev__select" value={props.chosenCamera ?? ''}
+            onChange={(e) => props.onCamera(e.target.value || null)}>
+            <option value="">Device default{props.chosenCamera ? '' : ` (${props.cameras.find((c) => c.id === props.cameraId)?.label ?? 'in use'})`}</option>
+            {props.cameras.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </label>
+      )}
       {props.zoom ? (
         <label className="capdev__slider">
           <span>ZOOM</span>

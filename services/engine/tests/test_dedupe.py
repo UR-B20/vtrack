@@ -90,8 +90,8 @@ class TestNeverWorse:
         assert not out.adopted
 
     def test_adopted_columns_move_together(self):
-        # A new confidence beside an old checksum would render "CHECKSUM FAILED ON RAW READ"
-        # under a clean PROCEED. Every read-derived column is taken from the SAME read.
+        # A new confidence beside an old checksum or repair would mix two reads on one screen.
+        # Every read-derived column is taken from the SAME read.
         c = candidate(decision="allow", confidence=0.97, checksum_ok=True, repaired_from=None,
                       plate_raw="SNB9538E", bbox=[9, 9, 9, 9])
         out = merge(existing(decision="check", confidence=0.58), c, NOW, DEDUPE_S)

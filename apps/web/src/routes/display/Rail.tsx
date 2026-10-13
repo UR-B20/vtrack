@@ -2,6 +2,7 @@ import { formatClock } from '../../lib/format'
 import { formatPlate } from '../../lib/plates'
 import { SearchIcon } from '../../lib/icons'
 import { RAIL_WORD, type EventRow } from '../../lib/types'
+import { toneOf } from './screen'
 
 interface Props {
   events: EventRow[]
@@ -10,12 +11,12 @@ interface Props {
 }
 
 /**
- * The 320 px right rail: the last five reads (§6.1).
+ * The last five reads (§6.1): a right rail in landscape, a strip under the stage on the phone.
  *
  * The top row is highlighted because it is the MOST RECENT, not because it is on the
  * stage — which is why the highlight is still there in gate-standby.png after the stage
  * has cleared. Chips always render the best guess (plate_norm); the raw read appears
- * only in the CHECK stage's "what the camera saw" panel.
+ * on an orange screen's line (screen.ts).
  */
 export function Rail({ events, dimmed, onTypeAPlate }: Props) {
   return (
@@ -28,9 +29,9 @@ export function Rail({ events, dimmed, onTypeAPlate }: Props) {
           <div key={e.id} className={`rail__row${i === 0 && !dimmed ? ' rail__row--current' : ''}`}>
             <span className="rail__time">{formatClock(e.ts)}</span>
             <span className="plate plate--chip">{formatPlate(e.plate_norm ?? e.plate_raw ?? '')}</span>
-            <span className="rail__decision" style={{ color: `var(--${e.decision})` }}>
+            <span className="rail__decision" style={{ color: `var(--${toneOf(e)})` }}>
               <span className="rail__dot" />
-              {RAIL_WORD[e.decision]}
+              {RAIL_WORD[toneOf(e)]}
             </span>
           </div>
         ))}

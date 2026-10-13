@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { Size } from '../../lib/frame'
 import { store } from '../../lib/captureStore'
 import { clampZoom, zoomRange, type ZoomRange } from '../../lib/zoom'
+import { cameraChoices, type CameraChoice } from '../../lib/cameras'
 
 export type CameraState = { kind: 'starting' } | { kind: 'live'; size: Size } | { kind: 'failed'; message: string }
 
@@ -20,23 +21,33 @@ function cameraProblem(e: unknown): string {
 }
 
 /**
- * The rear camera into a <video>. `size` is the camera's own resolution (videoWidth ×
+ * The rear camera — or the camera chosen in the ?dev=1 panel, such as a video capture card on
+ * a desktop (lib/cameras.ts) — into a <video>. `size` is the camera's own resolution (videoWidth ×
  * videoHeight), which the ROI, the crop and the box mapping are all measured in; it is
  * re-read when the stream changes shape (the tablet rotated).
  *
  * `zoom` is null when the camera (or the browser) offers none. The zoom last set on this
- * device is re-applied when the camera starts.
+ * device is re-applied when the camera starts. `cameras` lists every camera once one is live;
+ * `cameraId` is the one in use, `chosenCamera` the one chosen (null: the browser picks). A chosen camera that is gone (the card unplugged) is
+ * forgotten and the browser's own camera starts instead.
  */
 export function useCamera(): {
   videoRef: RefObject<HTMLVideoElement | null>
   camera: CameraState
   zoom: CameraZoom | null
   setZoom: (value: number) => void
+  cameras: CameraChoice[]
+  cameraId: string | null
+  chosenCamera: string | null
+  chooseCamera: (id: string | null) => void
 } {
   const videoRef = useRef<HTMLVideoElement>(null)
   const trackRef = useRef<MediaStreamTrack | null>(null)
   const [camera, setCamera] = useState<CameraState>({ kind: 'starting' })
   const [zoom, setZoomState] = useState<CameraZoom | null>(null)
+  const [chosen, setChosen] = useState<string | null>(store.camera)
+  const [cameras, setCameras] = useState<CameraChoice[]>([])
+  const [cameraId, setCameraId] = useState<string | null>(null)
 
   const applyZoom = useCallback(async (track: MediaStreamTrack, range: ZoomRange, wanted: number) => {
     const value = clampZoom(wanted, range)
@@ -51,6 +62,8 @@ export function useCamera(): {
     let cancelled = false
     let stream: MediaStream | null = null
     const video = videoRef.current
+    setCamera({ kind: 'starting' })
+    setZoomState(null)
     const onSize = () => {
       if (video && video.videoWidth && video.videoHeight) {
         setCamera({ kind: 'live', size: { width: video.videoWidth, height: video.videoHeight } })
@@ -62,8 +75,11 @@ export function useCamera(): {
       .getUserMedia({
         // `ideal`, not `exact`: a laptop has only a front camera. §6.2 asks for 1920 wide
         // where the camera can give it. `zoom: true` asks Chrome for the camera's zoom too;
-        // a camera without one still starts.
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, zoom: true } as MediaTrackConstraints,
+        // a camera without one still starts. A chosen camera is asked for by its id.
+        video: {
+          ...(chosen ? { deviceId: { exact: chosen } } : { facingMode: { ideal: 'environment' } }),
+          width: { ideal: 1920 }, zoom: true,
+        } as MediaTrackConstraints & { zoom: boolean },
         audio: false,
       })
       .then((s) => {
@@ -76,6 +92,11 @@ export function useCamera(): {
         stream = s
         const track = s.getVideoTracks()[0] ?? null
         trackRef.current = track
+        setCameraId((track?.getSettings().deviceId as string | undefined) ?? null)
+        // Ids and labels are only given out once the camera is allowed, i.e. now.
+        void navigator.mediaDevices.enumerateDevices()
+          .then((list) => { if (!cancelled) setCameras(cameraChoices(list)) })
+          .catch(() => undefined)
         const caps = track?.getCapabilities?.() as Record<string, unknown> | undefined
         const range = zoomRange(caps?.zoom)
         if (track && range) {
@@ -88,7 +109,14 @@ export function useCamera(): {
         }
       })
       .catch((e) => {
-        if (!cancelled) setCamera({ kind: 'failed', message: cameraProblem(e) })
+        if (cancelled) return
+        const name = (e as { name?: string })?.name
+        if (chosen && (name === 'NotFoundError' || name === 'OverconstrainedError')) {
+          store.setCamera(null)
+          setChosen(null)
+          return
+        }
+        setCamera({ kind: 'failed', message: cameraProblem(e) })
       })
     return () => {
       cancelled = true
@@ -97,12 +125,17 @@ export function useCamera(): {
       stream?.getTracks().forEach((t) => t.stop())
       trackRef.current = null
     }
-  }, [applyZoom])
+  }, [applyZoom, chosen])
 
   const setZoom = useCallback((value: number) => {
     const track = trackRef.current
     if (track && zoom) void applyZoom(track, zoom.range, value)
   }, [applyZoom, zoom])
 
-  return { videoRef, camera, zoom, setZoom }
+  const chooseCamera = useCallback((id: string | null) => {
+    store.setCamera(id)
+    setChosen(id)
+  }, [])
+
+  return { videoRef, camera, zoom, setZoom, cameras, cameraId, chosenCamera: chosen, chooseCamera }
 }

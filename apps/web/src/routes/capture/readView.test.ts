@@ -21,7 +21,7 @@ describe('readView', () => {
 
   it('check carries its reason and the repair', () => {
     const v = readView({ ...base, decision: 'check', reason: 'low_confidence', repaired_from: 'SNB953BE', plate_display: undefined, plate_norm: 'SNB9538E' })
-    expect(v).toMatchObject({ tone: 'check', word: 'CHECK', plate: 'SNB 9538 E', detail: 'Read not confident enough', repaired: true })
+    expect(v).toMatchObject({ tone: 'check', word: 'VERIFY', plate: 'SNB 9538 E', detail: 'Read not confident enough', repaired: true })
   })
 
   it('flags verify between the thresholds', () => {

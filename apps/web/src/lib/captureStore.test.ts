@@ -49,4 +49,10 @@ describe('roiSignature and zoom', () => {
     expect(roiSignature(roi, 16 / 9, 2)).not.toBe(roiSignature(roi, 16 / 9))
     expect(roiSignature(roi, 16 / 9, 2)).not.toBe(roiSignature(roi, 16 / 9, 3))
   })
+
+  it('a chosen camera (a capture card) has its own empty-lane picture', () => {
+    expect(roiSignature(roi, 16 / 9, 1, null)).toBe(roiSignature(roi, 16 / 9))
+    expect(roiSignature(roi, 16 / 9, 1, 'card')).not.toBe(roiSignature(roi, 16 / 9))
+    expect(roiSignature(roi, 16 / 9, 1, 'card')).not.toBe(roiSignature(roi, 16 / 9, 1, 'webcam'))
+  })
 })
