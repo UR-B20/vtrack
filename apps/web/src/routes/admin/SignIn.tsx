@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { absoluteHref } from '../../lib/router'
 
 /**
  * Admin sign-in — Supabase Auth email OTP (§6.3).
@@ -19,7 +20,13 @@ export function SignIn() {
   async function send() {
     if (!supabase) return setError('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
     setBusy(true); setError(null)
-    const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: true } })
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      // The emailed link comes back here, not to the project's Site URL. Supabase honours
+      // it only if it matches Authentication → URL Configuration → Redirect URLs
+      // (https://ur-b20.github.io/vtrack/**); otherwise it falls back to the Site URL.
+      options: { shouldCreateUser: true, emailRedirectTo: absoluteHref('admin', window.location.origin) },
+    })
     setBusy(false)
     if (error) setError(error.message)
     else setSent(true)
