@@ -7,7 +7,7 @@
  * reads "LIST SYNCED 14:01 · 412 VEHICLES", gate-offline.png "LIST CACHED 14:01".
  */
 
-import { get, set } from 'idb-keyval'
+import { del, get, set } from 'idb-keyval'
 import type { VehiclePublic } from './types'
 import { normalise } from './plates'
 import { supabase } from './supabase'
@@ -71,6 +71,16 @@ export async function saveVehicles(rows: VehiclePublic[]): Promise<CachedList> {
 }
 
 /**
+ * Forget the offline copy. Called when the display signs out: the list is personal data,
+ * and a phone that is no longer signed in has no business keeping it.
+ */
+export async function clearVehicles(): Promise<void> {
+  try {
+    await Promise.all([del(ROWS_KEY), del(META_KEY)])
+  } catch { /* storage blocked: nothing was kept */ }
+}
+
+/**
  * Pull the whole list from `vehicles_public` and cache it.
  *
  * Always returns a usable CachedList: on failure the previously cached rows are kept and
@@ -96,7 +106,7 @@ function describeError(error: { code?: string; message: string }): string {
     return 'vehicles_public does not exist — run supabase/migrations/0002_policies.sql'
   }
   if (error.code === '42501' || /permission denied/i.test(m)) {
-    return 'permission denied on vehicles_public — re-run supabase/migrations/0002_policies.sql'
+    return 'permission denied on vehicles_public — sign in on this display, and check 0004_display_sign_in.sql was run'
   }
   return [error.code, m].filter(Boolean).join(' · ') || 'the vehicle list could not be read'
 }
@@ -136,8 +146,8 @@ export async function refreshVehicles(): Promise<CachedList> {
   }
 
   if (!data || data.length === 0) {
-    // Reachable and permitted, but nothing there. Almost always seed.sql not run, or
-    // run against a different project than the one this build points at.
+    // Reachable and permitted, but nothing there: the list really is empty, it is another
+    // project than this build points at, or (since 0004) this login has no display role.
     console.warn('[vtrack] vehicles_public returned 0 rows — has supabase/seed.sql been run on this project?')
     const saved = await saveVehicles([])
     return { ...saved, syncError: 'the approved list is empty — run supabase/seed.sql' }

@@ -438,7 +438,7 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
 .import-report__row--rejected .import-report__why { color: var(--deny-field); }
 
 /* sign-in */
-.signin { height: 100%; display: flex; align-items: center; justify-content: center; background: var(--navy); }
+.signin { height: 100%; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--navy); }
 .signin__card {
   width: min(420px, 100%); padding: 34px;
   background: var(--navy-2); border: 1px solid var(--line-2); border-radius: 14px;
@@ -452,6 +452,7 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
 }
 .signin__card input:focus { border-color: var(--hl); }
 .error-note { color: var(--deny); font-size: 14px; margin: 0; }
+.signin__card .error-note { color: var(--deny); }
 
 /* ── /capture, point A (§6.2, docs/screens/capture.png) — tokens only, as everywhere ── */
 .cap {

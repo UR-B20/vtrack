@@ -54,11 +54,16 @@ Paste these into the Supabase SQL editor **in order**:
 | 1 | `supabase/migrations/0001_init.sql` | Schema. |
 | 2 | `supabase/migrations/0002_policies.sql` | RLS, the two public views, realtime. Re-runnable. |
 | 3 | `supabase/migrations/0003_foreign_reason.sql` | Adds the `foreign` deny reason (only Singapore plates are admitted). Re-runnable. **An existing project:** run this before the engine that writes it deploys. |
-| 4 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. |
-| 5 | — | **Sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
-| 6 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
+| 4 | `supabase/migrations/0004_display_sign_in.sql` | The public key opens nothing; the display signs in (below). Also clears the Supabase advisor warnings. Re-runnable. **Re-run it after any re-run of 0002**, which would reopen the old access. |
+| 5 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
+| 6 | — | **Sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
+| 7 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
+| 8 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
+| 9 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
 
-Step 6's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
+Also turn on **Authentication → (Sign In / Providers →) Email → Prevent use of leaked passwords** if your plan offers it. The display login is the one account with a password.
+
+Steps 7 and 9's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
 
 Then create `apps/web/.env` from [`.env.example`](.env.example):
 
@@ -69,15 +74,15 @@ VITE_SITE=gate1
 VITE_LANE=A
 ```
 
-The anon key is public by design — it ships in the browser. Everything it may do is defined by the policies in `0002_policies.sql`; the service key never leaves the engine's host secrets.
+The anon key is public by design — it ships in the browser — so since `0004` it may do nothing at all: no reads, no writes. Everything the display sees comes through its own login (role `display`), and the admin console through the admin login. The service key never leaves the engine's host secrets.
 
 > Supabase's free tier **pauses after 7 idle days**. From M3 the engine's heartbeats keep it awake; until then, check the dashboard before a demo.
 
 ### Optional: round-trip the Simulate panel through Realtime
 
-By default `?dev=1` tries a real `events` insert and falls back to injecting the row straight into the display when RLS refuses. To exercise the genuine Realtime INSERT/UPDATE path instead, apply `supabase/dev/simulate_policy.sql` and set `VITE_SITE=devlab`.
+By default `?dev=1` tries a real `events` insert and falls back to injecting the row straight into the display when RLS refuses. To exercise the genuine Realtime INSERT/UPDATE path instead, sign in on the display, apply `supabase/dev/simulate_policy.sql` and set `VITE_SITE=devlab`.
 
-That grant is scoped to one device on one fake site precisely because the anon key is public — an open `anon can insert events` policy would let anyone who views source push a green `PROCEED` onto the guard's screen. **Revert it with `supabase/dev/simulate_policy_down.sql` before any device goes to the gate.**
+That grant is scoped to one device on one fake site precisely because an open `display can insert events` policy would let that login push a green `PROCEED` onto the guard's screen. **Revert it with `supabase/dev/simulate_policy_down.sql` before any device goes to the gate.**
 
 ---
 
@@ -278,7 +283,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
    - If a vehicle is missed, lower **PRESENT AT**. If shadows or headlights count as vehicles, raise it.
 9. **Pin the screen** so the page can't be left: Android **Settings → Security → App pinning** (the name varies by model) → on. Then, from Recents, tap Chrome's icon → **Pin**.
 
-**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. Mount it facing the guard, not the lane: the green screen names the owner.
+**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. **Sign in once** with the display login (Set up Supabase, steps 8–9); the phone stays signed in. To sign it out, open `/display?dev=1` → **SIGN THIS DISPLAY OUT**, which also deletes the phone's offline copy of the list. Mount it facing the guard, not the lane: the green screen names the owner.
 - Green **PROCEED**: on the list and valid.
 - Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
 - Red **DO NOT ALLOW**: a foreign plate.
