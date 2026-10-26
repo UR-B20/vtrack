@@ -36,6 +36,7 @@ SQL = [Path(__file__).with_name("pg_shims.sql"),
        REPO / "supabase/migrations/0002_policies.sql",
        REPO / "supabase/migrations/0003_foreign_reason.sql",
        REPO / "supabase/migrations/0004_display_sign_in.sql",
+       REPO / "supabase/migrations/0005_device_tokens.sql",
        REPO / "supabase/seed.sql"]
 CAM = Device("cam-a", "capture", "gate1", "A")
 DISPLAY = Device("display-b", "display", "gate1", "A")
@@ -306,3 +307,65 @@ class TestAdvisorFixes:
         assert db.execute(
             "select 1 from pg_indexes where schemaname = 'public' and tablename = %s "
             "and indexdef ~ %s", (table, rf"\({column}\)")).fetchone()
+
+
+HASH = "ab" * 32
+
+
+class TestDeviceTokens:
+    """0005 (CLAUDE.md §11, Device tokens): an admin sets a device's token hash from the
+    Devices page; nobody else can, and no browser ever reads one."""
+
+    @pytest.fixture(autouse=True)
+    def clean(self, db):
+        yield
+        db.execute("update public.devices set token_hash = null, token_rotated_at = null")
+
+    def hash_of(self, db, dev="cam-a"):
+        return db.execute("select token_hash from public.devices where id = %s", (dev,)).fetchone()[0]
+
+    def test_admin_sets_a_new_token_hash(self, db):
+        with as_user(db, "authenticated", "admin"):
+            cur = db.execute("update public.devices set token_hash = %s, token_rotated_at = now() "
+                             "where id = 'cam-a'", (HASH,))
+            assert cur.rowcount == 1
+            # It can see when, never what.
+            assert db.execute("select token_rotated_at from public.devices where id = 'cam-a'").fetchone()[0]
+        assert self.hash_of(db) == HASH
+
+    def test_admin_cannot_rewrite_anything_else(self, db):
+        import psycopg
+        with as_user(db, "authenticated", "admin"), pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute("update public.devices set site = 'elsewhere' where id = 'cam-a'")
+
+    def test_the_display_cannot_set_one(self, db):
+        with as_user(db, "authenticated", "display"):
+            cur = db.execute("update public.devices set token_hash = %s where id = 'cam-a'", (HASH,))
+            assert cur.rowcount == 0
+        assert self.hash_of(db) is None
+
+    def test_anon_cannot_set_one(self, db):
+        import psycopg
+        with as_user(db, "anon"), pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute("update public.devices set token_hash = %s where id = 'cam-a'", (HASH,))
+
+    @pytest.mark.parametrize("bad", ["not-a-hash", "AB" * 32, "ab" * 31])
+    def test_only_a_sha256_hex_is_accepted(self, db, bad):
+        import psycopg
+        with as_user(db, "authenticated", "admin"), pytest.raises(psycopg.errors.CheckViolation):
+            db.execute("update public.devices set token_hash = %s where id = 'cam-a'", (bad,))
+
+    def test_no_browser_reads_a_hash_even_after_one_is_set(self, db):
+        import psycopg
+        db.execute("update public.devices set token_hash = %s where id = 'cam-a'", (HASH,))
+        for app_role in ("admin", "display"):
+            with as_user(db, "authenticated", app_role), pytest.raises(psycopg.errors.InsufficientPrivilege):
+                db.execute("select token_hash from public.devices")
+
+    def test_the_engine_reads_them(self, db):
+        db.execute("update public.devices set token_hash = %s where id = 'cam-a'", (HASH,))
+        db.execute("set role service_role")
+        try:
+            assert self.hash_of(db) == HASH
+        finally:
+            db.execute("reset role")

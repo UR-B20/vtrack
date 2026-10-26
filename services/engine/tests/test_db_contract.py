@@ -64,10 +64,11 @@ class TestReads:
         assert (rec.last.method, rec.last.url.path) == ("GET", "/rest/v1/devices")
         assert dict(rec.last.url.params) == {"select": "id", "limit": "1"}
 
-    def test_get_devices_quotes_ids(self):
-        rec = Recorder([{"id": "cam-a", "role": "capture", "site": "gate1", "lane": "A"}])
-        out = run(store(rec).get_devices(["cam-a", "display-b"]))
-        assert rec.last.url.params["id"] == 'in.("cam-a","display-b")'
+    def test_get_devices_reads_every_row_with_its_token_hash(self):
+        rec = Recorder([{"id": "cam-a", "role": "capture", "site": "gate1", "lane": "A",
+                         "token_hash": None}])
+        out = run(store(rec).get_devices())
+        assert dict(rec.last.url.params) == {"select": "id,role,site,lane,token_hash"}
         assert out["cam-a"]["site"] == "gate1"
 
     def test_get_vehicle(self):

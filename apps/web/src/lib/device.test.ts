@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePairing, parsePairingCode, storageKey } from './device'
+import { parsePairing, parsePairingCode, storageKey, typedToken } from './device'
 
 const good = { deviceId: 'cam-a', token: 'x'.repeat(32) }
 
@@ -41,5 +41,17 @@ describe('parsePairingCode (the QR from vtrack-pair-qr)', () => {
     expect(parsePairingCode(`{"vtrack":1,"device":"cam-a","token":"short"}`)).toBeNull()
     expect(parsePairingCode(`{"vtrack":1,"device":"../x","token":"${token}"}`)).toBeNull()
     expect(parsePairingCode('')).toBeNull()
+  })
+})
+
+
+describe('typedToken', () => {
+  it('upper-cases a token set in admin, typed in lower case or with stray spaces', () => {
+    expect(typedToken(' 7k3m-qx9d-0123-4567-89ab-cdef-ghjk-mnpq ')).toBe('7K3M-QX9D-0123-4567-89AB-CDEF-GHJK-MNPQ')
+    expect(typedToken('7K3M-QX9D-0123-4567 -89AB-CDEF-GHJK-MNPQ')).toBe('7K3M-QX9D-0123-4567-89AB-CDEF-GHJK-MNPQ')
+  })
+
+  it('leaves a DEVICE_TOKENS token exactly as typed — those are case-sensitive', () => {
+    expect(typedToken(' aB3_xY9-kLmN0pQr2sTuVwXyZ01234567 ')).toBe('aB3_xY9-kLmN0pQr2sTuVwXyZ01234567')
   })
 })

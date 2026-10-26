@@ -19,6 +19,8 @@ Design intent lives in [`docs/design-brief.md`](docs/design-brief.md); the build
 
 **13 Oct 2026:** B is a phone in portrait with three screens (green, orange, red for foreign plates only) and one OK button; A is a desktop with a video capture card (CLAUDE.md §11).
 
+**26 Oct 2026:** the public key opens nothing and phone B signs in; A is a desktop with a USB webcam on phone B's mobile data; `/admin` has **Events** (the gate's history) and **Devices** (last seen, and a new token for the camera).
+
 M3: heartbeat-driven OFFLINE banner, guard-action audit, crops and retention.
 
 ---
@@ -55,15 +57,16 @@ Paste these into the Supabase SQL editor **in order**:
 | 2 | `supabase/migrations/0002_policies.sql` | RLS, the two public views, realtime. Re-runnable. |
 | 3 | `supabase/migrations/0003_foreign_reason.sql` | Adds the `foreign` deny reason (only Singapore plates are admitted). Re-runnable. **An existing project:** run this before the engine that writes it deploys. |
 | 4 | `supabase/migrations/0004_display_sign_in.sql` | The public key opens nothing; the display signs in (below). Also clears the Supabase advisor warnings. Re-runnable. **Re-run it after any re-run of 0002**, which would reopen the old access. |
-| 5 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
-| 6 | — | First, **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". Then **sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
-| 7 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
-| 8 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
-| 9 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
+| 5 | `supabase/migrations/0005_device_tokens.sql` | Lets the admin Devices page set a camera's token (below); without it that page says so. Re-runnable. |
+| 6 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
+| 7 | — | First, **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". Then **sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
+| 8 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
+| 9 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
+| 10 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
 
 Also turn on **Authentication → (Sign In / Providers →) Email → Prevent use of leaked passwords** if your plan offers it. The display login is the one account with a password.
 
-Steps 7 and 9's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
+Steps 8 and 10's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
 
 Then create `apps/web/.env` from [`.env.example`](.env.example):
 
@@ -152,7 +155,7 @@ apps/web/src/
   lib/sounds.ts      Web Audio chimes, no files
   routes/display/displayMachine.ts   the pure state machine
   routes/display/…   TopBar · Stage (screen.ts: which of the three screens) · Rail · ManualMode · OfflineBanner
-  routes/admin/…     VehiclesTable · VehicleDrawer · csv.ts
+  routes/admin/…     VehiclesTable · VehicleDrawer · csv.ts · EventsPage · DevicesPage
   routes/capture/…   CaptureRoute · PairDevice · CameraView (+ parts, ScreenLock, DevPanel, grab, useCamera) · readView.ts
   lib/presence.ts    when the camera sends a frame (pure; presence.test.ts)
   lib/roi.ts         the lane ROI · lib/captureStore.ts what the tablet keeps · lib/updates.ts idle-only updates
@@ -197,6 +200,8 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 **An `invalid` read is offered to repair.** Every repair example in §5.1 breaks the pattern rather than the checksum, so read literally §5.2 would never repair them. `STRICT_SPEC_REPAIR` in `decide.py` restores the literal reading.
 
 **If the write fails, the answer has no decision in it.** `/capture` must never show a colour the guard's screen did not get.
+
+**A token set in admin replaces `DEVICE_TOKENS` for that device.** `devices.token_hash` holds only a sha256; the engine re-reads the device list every 30 s, and once more when an unknown token arrives (at most every 5 s), so a newly paired camera works within seconds and the old token stops. A Supabase blip keeps the last good list rather than locking every device out.
 
 **Events take their site from the device's row.** `/display` filters on site; a token whose device has no row, or no site, is refused before anything is written.
 
@@ -253,15 +258,16 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 
 **Before you go:** if you ever ran `supabase/dev/simulate_policy.sql`, run `supabase/dev/simulate_policy_down.sql` now.
 
-**A on a desktop with a capture card** — the set-up in use from 13 Oct 2026. Do this first, then steps 5–8 below.
-1. Show the camera's picture full screen on the device that has it, and mirror that screen into the capture card. Plug the card's USB into the desktop. Keep that screen awake, with notifications off: anything that appears inside the lane box looks like a vehicle.
-2. Close any other app that uses the card (OBS, the card's own viewer). Only one app can hold it.
-3. In Chrome on the desktop, open **https://ur-b20.github.io/vtrack/capture?dev=1** and allow the camera.
-4. **Pair it** with **TYPE THE TOKEN INSTEAD** (Chrome on Windows cannot scan the QR code): device `cam-a`, token the `cam-a` value of `DEVICE_TOKENS` in `services/engine/.env`. Never paste it anywhere else.
-5. **Unlock:** hold the bottom bar with the mouse for 2 s.
-6. In the dev panel, **CAMERA** → pick the capture card (often *USB Video* or the card's name). The desktop remembers it. If the card is unplugged, the page falls back to the desktop's own camera, so check the picture after any restart.
-7. Keep the mirrored screen's clock, battery and buttons out of the lane box. Use the source's own zoom: a capture card offers none.
-8. Set the desktop never to sleep and never to turn the screen off.
+**A on a desktop with a USB webcam** — the set-up in use from 26 Oct 2026. Do this first, then steps 5–8 under *A on a phone*.
+1. **The webcam:** a 1080p USB webcam (e.g. Logitech C920s) within 3 m of the stop line, aimed as straight at the plate as possible. Behind the guardhouse glass with a black hood against reflections, or outdoors in an IP65 box with a clear lid, under cover. An active USB extension if the desktop is more than ~1.5 m away.
+2. **Internet:** the desktop shares phone B's mobile data, by USB tethering (steadier) or its hotspot (set "turn off when no devices are connected" to Never). In Windows, set that connection to **Metered**, so updates do not eat the data.
+3. **Windows:** power and screen to **Never** sleep. In Edge, turn **Efficiency mode** off and add `ur-b20.github.io` to **Never put these sites to sleep**.
+4. In Edge, open **https://ur-b20.github.io/vtrack/capture?dev=1** and allow the camera.
+5. **Pair it** with **TYPE THE TOKEN INSTEAD** (Edge and Chrome on Windows cannot scan the QR code): device `cam-a`, and the token from **/admin → Devices → NEW TOKEN** (*Changing a camera's token*, below), dashes included. Never paste it anywhere else.
+6. **Unlock:** hold the bottom bar with the mouse for 2 s.
+7. In the dev panel, **CAMERA** → pick the webcam if the desktop has more than one camera. The desktop remembers it, and falls back to its default camera if the webcam is unplugged, so check the picture after any restart. The webcam has no zoom: move it, not the box, if the plate is small.
+
+A capture card works the same way (pick it under **CAMERA**): mirror the camera's screen into it and keep that screen's clock, battery and notifications out of the lane box.
 
 **A on a phone** — the page is designed in portrait.
 1. Turn **auto-rotate off**. Mount the tablet facing the vehicles as they arrive: queued cars then sit further back and look smaller, and motorcycles show their front number sticker.
@@ -283,12 +289,16 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
    - If a vehicle is missed, lower **PRESENT AT**. If shadows or headlights count as vehicles, raise it.
 9. **Pin the screen** so the page can't be left: Android **Settings → Security → App pinning** (the name varies by model) → on. Then, from Recents, tap Chrome's icon → **Pin**.
 
-**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. **Sign in once** with the display login (Set up Supabase, steps 8–9); the phone stays signed in. To sign it out, open `/display?dev=1` → **SIGN THIS DISPLAY OUT**, which also deletes the phone's offline copy of the list. Mount it facing the guard, not the lane: the green screen names the owner.
+**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. **Sign in once** with the display login (Set up Supabase, steps 9–10); the phone stays signed in. To sign it out, open `/display?dev=1` → **SIGN THIS DISPLAY OUT**, which also deletes the phone's offline copy of the list. Mount it facing the guard, not the lane: the green screen names the owner.
 - Green **PROCEED**: on the list and valid.
 - Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
 - Red **DO NOT ALLOW**: a foreign plate.
 - Press **OK** once you have seen the result: the screen goes back to *Waiting for vehicle*. Without OK it stays 30 s after the last read. The next vehicle always replaces it. **TYPE A PLATE** searches the list by hand.
-- The OFFLINE banner stays off until M3 wires the camera's heartbeats to it.
+- The OFFLINE banner stays off until M3 wires the camera's heartbeats to it. Meanwhile **/admin → Devices** shows when the camera last reported.
+
+**Changing a camera's token.** **/admin → Devices → NEW TOKEN** on the camera's row. It makes a new token in your browser, shows it **once**, and saves only its hash: within a few seconds the engine accepts the new token and the old one — whether from Render's `DEVICE_TOKENS` or an earlier one set here — stops working. Then, on the camera, unlock, **UNPAIR**, and pair again with **TYPE THE TOKEN INSTEAD**. Do it when the gate is quiet: until the camera is paired again, vehicles get no result. Use it whenever a token may have been seen by someone else. (`uv run vtrack-pair-qr` only knows the `DEVICE_TOKENS` one, which stops working once a token is set here.)
+
+**The gate's history.** **/admin → Events** lists every vehicle the gate answered for, newest first, in the colour the guard saw, with the reason line, the owner from today's list and when OK was pressed. Filter by day range, colour or plate.
 
 **Saving frames, to look into a missed read.** In the dev panel, tick **SAVE EVERY FRAME SENT**. Each frame the tablet sends is also saved to its Downloads, named by vehicle (`v20260923-143206-01.jpg`, `-02`, …). These are personal data (PDPA):
 - turn off cloud backup of Downloads (Samsung Cloud / Google Photos);

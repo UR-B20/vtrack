@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { EngineError, sendHeartbeat } from '../../lib/engine'
-import { MIN_TOKEN_LEN, parsePairingCode, savePairing, type Pairing } from '../../lib/device'
+import { MIN_TOKEN_LEN, parsePairingCode, savePairing, typedToken, type Pairing } from '../../lib/device'
 
 interface Props {
   engineUrl: string
@@ -57,7 +57,7 @@ export function PairDevice({ engineUrl, onPaired }: Props) {
 
   function submit(e: FormEvent) {
     e.preventDefault()
-    void verify({ deviceId: deviceId.trim(), token: token.trim() })
+    void verify({ deviceId: deviceId.trim(), token: typedToken(token) })
   }
 
   return (

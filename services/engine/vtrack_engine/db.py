@@ -28,7 +28,7 @@ VEHICLE_COLUMNS = (
     "id,plate_norm,plate_display,owner_name,org_unit,pass_type,status,valid_from,valid_until"
 )
 OPEN_EVENT_COLUMNS = "id,plate_norm,decision,confidence,read_count,last_read_at"
-DEVICE_COLUMNS = "id,role,site,lane"
+DEVICE_COLUMNS = "id,role,site,lane,token_hash"
 
 
 class StoreError(Exception):
@@ -45,7 +45,7 @@ class StoreConflict(StoreError):
 
 class EventStore(Protocol):
     async def ping(self) -> None: ...
-    async def get_devices(self, ids: list[str]) -> dict[str, dict[str, Any]]: ...
+    async def get_devices(self) -> dict[str, dict[str, Any]]: ...
     async def get_vehicle(self, plate_norm: str) -> VehicleRow | None: ...
     async def find_open_event(self, site: str, lane: str, plate_norm: str,
                               since: datetime) -> OpenEvent | None: ...
@@ -152,12 +152,9 @@ class SupabaseStore:
         # so this succeeds only with a genuine service key sent in the right headers.
         await self._request("GET", "devices", params={"select": "id", "limit": "1"})
 
-    async def get_devices(self, ids: list[str]) -> dict[str, dict[str, Any]]:
-        if not ids:
-            return {}
-        quoted = ",".join(f'"{i}"' for i in ids)
-        rows = await self._request("GET", "devices",
-                                   params={"select": DEVICE_COLUMNS, "id": f"in.({quoted})"})
+    async def get_devices(self) -> dict[str, dict[str, Any]]:
+        """Every row: a device may be known only by a token hash set from /admin."""
+        rows = await self._request("GET", "devices", params={"select": DEVICE_COLUMNS})
         return {r["id"]: r for r in rows or []}
 
     async def get_vehicle(self, plate_norm: str) -> VehicleRow | None:

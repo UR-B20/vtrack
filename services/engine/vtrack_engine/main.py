@@ -58,6 +58,12 @@ from .pipeline import band_from_roi, conclude, lookups, seen_plate_from_form
 from .plates import CIVILIAN, checksum_letter, classify
 
 VERSION = "m2"
+
+# Device tokens set from /admin live in `devices.token_hash` (auth.py). The list is re-read
+# this often, and at most this often when a token nobody knows arrives — a device just
+# paired with a new token works within seconds, and random tokens cannot hammer the DB.
+DEVICE_REFRESH_S = 30.0
+DEVICE_RETRY_S = 5.0
 log = logging.getLogger("vtrack.engine")
 
 
@@ -136,8 +142,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             else:
                 state.store = SupabaseStore(settings.supabase_url, settings.supabase_service_key)
         if not settings.device_tokens:
-            log.error("DEVICE_TOKENS is empty %s — no device can use this engine",
-                      WHERE_SECRETS_LIVE)
+            log.warning("DEVICE_TOKENS is empty %s — only tokens set from the admin Devices "
+                        "page will work", WHERE_SECRETS_LIVE)
         await _check_db(state)
         tasks: list[asyncio.Task] = []
         if state.alpr is not None:
@@ -148,6 +154,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
             tasks.append(asyncio.create_task(_every(5.0, lambda: _probe_db(state, every_s=0))))
             tasks.append(asyncio.create_task(
                 _every(settings.heartbeat_s, lambda: _engine_heartbeat(state))))
+            tasks.append(asyncio.create_task(
+                _every(DEVICE_REFRESH_S, lambda: _refresh_devices(state))))
         _note(state)
         try:
             yield
@@ -198,7 +206,15 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
                            role: str | None = None) -> Device:
         if not state.registry.loaded:
             await _ensure_devices(state)
-        device = state.registry.resolve(token)
+        try:
+            device = state.registry.resolve(token)
+        except AuthError as exc:
+            # A token set in admin a moment ago: look once more before saying "unknown".
+            if exc.status != 401 or not token or \
+                    time.monotonic() - state.registry.loaded_at < DEVICE_RETRY_S:
+                raise
+            await _refresh_devices(state)
+            device = state.registry.resolve(token)
         check_claim(device, claimed)
         if role and device.role != role:
             raise AuthError(403, f"{device.id} is a {device.role} device; this needs {role}")
@@ -473,15 +489,23 @@ def _typed_plate(text: str) -> Interpretation:
 
 
 async def _ensure_devices(state: EngineState) -> None:
-    if state.store is None or state.registry.loaded:
+    if state.registry.loaded:
+        return
+    await _refresh_devices(state)
+
+
+async def _refresh_devices(state: EngineState) -> None:
+    """Re-read `devices` into the registry: new tokens set from /admin start working and
+    replaced ones stop. On failure the last good list stays — a Supabase blip must not
+    lock every device out."""
+    if state.store is None:
         return
     try:
-        rows = await state.store.get_devices(state.registry.device_ids)
+        rows = await state.store.get_devices()
     except StoreError as exc:
         _db_failed(state, exc)
         return
-    # Not _db_ok: with no device tokens configured this makes no request at all, and only
-    # a real answer from the database may count towards /ready.
+    # Not _db_ok: only ping() may count towards /ready.
     state.registry.load(rows)
 
 
