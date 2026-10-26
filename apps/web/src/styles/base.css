@@ -350,11 +350,14 @@ input { font: inherit; }
   padding: 12px 16px; min-width: 330px; flex: 0 1 440px;
 }
 .admin__search input { flex: 1; border: 0; background: transparent; outline: none; font-size: 16px; color: var(--ink); }
-.chip {
+/* Scoped to the console: /capture's dark status .chip (below) would otherwise win and draw
+   every filter as selected. */
+.admin .chip {
+  font-family: var(--font-ui); letter-spacing: normal;
   font-size: 15px; padding: 11px 20px; border-radius: 999px;
   background: var(--paper-2); border: 1px solid var(--line-paper); color: var(--ink);
 }
-.chip[aria-pressed='true'] { background: var(--navy); border-color: var(--navy); color: var(--paper-2); }
+.admin .chip[aria-pressed='true'] { background: var(--navy); border-color: var(--navy); color: var(--paper-2); }
 .admin__spacer { flex: 1; }
 
 .table-wrap { background: var(--paper-2); border: 1px solid var(--line-paper); border-radius: 11px; overflow: hidden; }
@@ -379,6 +382,7 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.1em;
   padding: 6px 12px; border-radius: 999px; white-space: nowrap;
 }
+.badge--muted         { background: rgba(91,107,127,0.12); color: var(--muted); }
 .badge--active        { background: rgba(15,107,62,0.13);  color: var(--allow-field); }
 .badge--expiring,
 .badge--expires_today { background: rgba(138,90,0,0.15);   color: var(--check-field); }
@@ -683,3 +687,23 @@ table.vehicles tbody tr:hover { background: rgba(31,78,140,0.06); }
   .manual__row { padding: 10px 12px; gap: 10px; flex-wrap: wrap; }
   .manual__row-text { font-size: 15px; }
 }
+
+/* /admin → Events and Devices (CLAUDE.md §6.3) */
+table.vehicles.events tbody tr, table.vehicles.devices tbody tr { cursor: default; }
+.events__time { font-size: 14px; color: var(--muted); white-space: nowrap; }
+.events__tag { font-size: 12px; color: var(--muted); letter-spacing: 0.08em; }
+.events__empty { color: var(--muted); text-align: center; padding: 28px 18px; }
+.events__more { margin-left: 16px; }
+.devices__id { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.devices__token { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.token-reveal {
+  margin-bottom: 22px; padding: 22px 24px; border-radius: 11px;
+  background: var(--paper-2); border: 2px solid var(--hl);
+}
+.token-reveal__head { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.14em; color: var(--hl); }
+.token-reveal__token {
+  margin: 12px 0 14px; font-size: clamp(18px, 2.4vw, 28px); font-weight: 700; letter-spacing: 0.06em;
+  color: var(--ink); word-break: break-all; user-select: all;
+}
+.token-reveal__steps { margin: 0 0 16px; padding-left: 20px; color: var(--ink); line-height: 1.6; }
+.token-reveal__actions { display: flex; gap: 10px; flex-wrap: wrap; }

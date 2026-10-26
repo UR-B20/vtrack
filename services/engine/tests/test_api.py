@@ -360,7 +360,7 @@ class TestHealth:
 
     def test_a_device_token_adds_the_detail(self, rig):
         body = rig.client.get("/health", headers={"X-Device-Token": CAM}).json()
-        assert body["devices"]["cam-a"] == "ok · capture · gate1/A"
+        assert body["devices"]["cam-a"] == "ok · capture · gate1/A · token DEVICE_TOKENS"
         assert "db_error" in body and "model_error" in body
 
     def test_an_unknown_token_gets_the_public_view_not_an_error(self, rig):
@@ -429,7 +429,7 @@ class TestReady:
         assert rig.client.get("/ready").status_code == 200
 
     def test_no_device_tokens_is_not_a_database_that_answered(self):
-        # With no tokens the device lookup makes no request; it must not count as an answer.
+        # Reading the device list is not ping(); it must not count as the database answering.
         store = InMemoryStore(seeded_vehicles(), DEVICES)
         store.fail_ping = StoreError(502, "cannot reach Supabase")
         with Rig(store=store, device_tokens={}) as r:
@@ -507,3 +507,35 @@ class TestEdges:
             "Access-Control-Request-Headers": "X-Device-Token"})
         assert pre("http://localhost:5173").headers.get("access-control-allow-origin") == "http://localhost:5173"
         assert "access-control-allow-origin" not in pre("https://evil.example").headers
+
+
+class TestTokenSetInAdmin:
+    """CLAUDE.md §11, Device tokens: the admin Devices page writes a new token's hash to
+    `devices.token_hash`; the engine must honour it without a restart, and the old token
+    must stop working."""
+
+    NEW = "N" * 43
+
+    def set_in_admin(self, rig, token):
+        from vtrack_engine.auth import token_hash
+        rig.store.devices["cam-a"]["token_hash"] = token_hash(token)
+
+    def beat(self, rig, token):
+        return rig.client.post("/heartbeat", headers={"X-Device-Token": token}, json={}).status_code
+
+    def test_a_new_token_works_at_once_and_the_old_one_stops(self, rig, monkeypatch):
+        import vtrack_engine.main as main
+        monkeypatch.setattr(main, "DEVICE_RETRY_S", 0.0)
+        assert self.beat(rig, CAM) == 204
+        self.set_in_admin(rig, self.NEW)
+        assert self.beat(rig, self.NEW) == 204       # unknown → one re-read → known
+        assert self.beat(rig, CAM) == 401            # DEVICE_TOKENS entry retired
+        assert self.beat(rig, DISP) == 204           # other devices untouched
+
+    def test_unknown_tokens_cannot_hammer_the_database(self, rig):
+        # Within DEVICE_RETRY_S of the last read, an unknown token is refused without one.
+        rig.client.post("/heartbeat", headers={"X-Device-Token": CAM}, json={})
+        rig.store.calls.clear()
+        for _ in range(3):
+            assert self.beat(rig, "z" * 32) == 401
+        assert rig.store.calls.count("get_devices") <= 1

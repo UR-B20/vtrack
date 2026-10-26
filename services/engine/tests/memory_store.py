@@ -31,10 +31,11 @@ class InMemoryStore:
         if self.fail_ping:
             raise self.fail_ping
 
-    async def get_devices(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+    async def get_devices(self) -> dict[str, dict[str, Any]]:
+        self.calls.append("get_devices")
         if self.fail_devices:
             raise self.fail_devices
-        return {i: self.devices[i] for i in ids if i in self.devices}
+        return {k: dict(v) for k, v in self.devices.items()}
 
     async def get_vehicle(self, plate_norm: str) -> VehicleRow | None:
         self.calls.append(f"get_vehicle:{plate_norm}")

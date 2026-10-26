@@ -23,6 +23,17 @@ export const MIN_TOKEN_LEN = 16
 
 export const storageKey = (role: DeviceRole) => `vtrack:device:${role}`
 
+/**
+ * A token as typed at the device. A token set from the admin Devices page is eight groups
+ * of four Crockford letters (lib/deviceToken.ts); typed in lower case it would not match,
+ * so that shape alone is upper-cased. Anything else — a DEVICE_TOKENS token, which is
+ * case-sensitive — is only trimmed.
+ */
+export function typedToken(raw: string): string {
+  const t = raw.trim().replace(/\s+/g, '')
+  return /^[0-9a-z]{4}(-[0-9a-z]{4}){7}$/i.test(t) ? t.toUpperCase() : raw.trim()
+}
+
 /** Validate a stored or typed pairing. Pure. */
 export function parsePairing(raw: string | null | undefined): Pairing | null {
   if (!raw) return null

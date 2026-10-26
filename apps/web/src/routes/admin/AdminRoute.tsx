@@ -6,14 +6,16 @@ import { SignIn } from './SignIn'
 import { VehiclesTable } from './VehiclesTable'
 import { VehicleDrawer, type VehicleDraft } from './VehicleDrawer'
 import type { importableRows } from './csv'
+import { EventsPage } from './EventsPage'
+import { DevicesPage } from './DevicesPage'
 
 type Page = 'vehicles' | 'events' | 'devices' | 'settings'
 
-/** The nav of admin.png. Only Vehicles is M0 — the rest arrive with the engine. */
+/** The nav of admin.png. Settings (thresholds, read from /health) is still to come. */
 const NAV: { key: Page; label: string; milestone?: string }[] = [
   { key: 'vehicles', label: 'VEHICLES' },
-  { key: 'events', label: 'EVENTS', milestone: 'M3' },
-  { key: 'devices', label: 'DEVICES', milestone: 'M3' },
+  { key: 'events', label: 'EVENTS' },
+  { key: 'devices', label: 'DEVICES' },
   { key: 'settings', label: 'SETTINGS', milestone: 'M3' },
 ]
 
@@ -27,7 +29,7 @@ export function AdminRoute() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<{ vehicle: Vehicle | null } | null>(null)
-  const [page] = useState<Page>('vehicles')
+  const [page, setPage] = useState<Page>('vehicles')
 
   useEffect(() => {
     if (!supabase) { setReady(true); return }
@@ -114,6 +116,7 @@ export function AdminRoute() {
               key={item.key} className="admin__navitem"
               aria-current={page === item.key ? 'page' : undefined}
               disabled={Boolean(item.milestone)}
+              onClick={() => setPage(item.key)}
               title={item.milestone ? `Arrives in ${item.milestone}` : undefined}
             >
               {item.label}
@@ -130,12 +133,16 @@ export function AdminRoute() {
 
       <main className="admin__main">
         {error && <p className="error-note" style={{ marginBottom: 16 }}>{error}</p>}
-        <VehiclesTable
-          vehicles={vehicles}
-          onEdit={(vehicle) => setDrawer({ vehicle })}
-          onAdd={() => setDrawer({ vehicle: null })}
-          onImport={onImport}
-        />
+        {page === 'vehicles' && (
+          <VehiclesTable
+            vehicles={vehicles}
+            onEdit={(vehicle) => setDrawer({ vehicle })}
+            onAdd={() => setDrawer({ vehicle: null })}
+            onImport={onImport}
+          />
+        )}
+        {page === 'events' && <EventsPage vehicles={vehicles} />}
+        {page === 'devices' && <DevicesPage />}
       </main>
 
       {drawer && (
