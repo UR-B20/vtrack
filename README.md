@@ -56,7 +56,7 @@ Paste these into the Supabase SQL editor **in order**:
 | 3 | `supabase/migrations/0003_foreign_reason.sql` | Adds the `foreign` deny reason (only Singapore plates are admitted). Re-runnable. **An existing project:** run this before the engine that writes it deploys. |
 | 4 | `supabase/migrations/0004_display_sign_in.sql` | The public key opens nothing; the display signs in (below). Also clears the Supabase advisor warnings. Re-runnable. **Re-run it after any re-run of 0002**, which would reopen the old access. |
 | 5 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
-| 6 | — | **Sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
+| 6 | — | First, **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". Then **sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
 | 7 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
 | 8 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
 | 9 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
