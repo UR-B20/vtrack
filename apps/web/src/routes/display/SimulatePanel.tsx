@@ -178,6 +178,12 @@ export function SimulatePanel({ current, onLocalEvent, cameraOnline, onToggleCam
       <button type="button" onClick={onToggleCamera}>
         CAMERA A · {cameraOnline ? 'GO OFFLINE' : 'GO LIVE'}
       </button>
+      {/* The display login (CLAUDE.md §11, Display sign-in) — here, out of the guard's way. */}
+      {supabase && (
+        <button type="button" onClick={() => { if (window.confirm('Sign this display out? It will need the display login again.')) void supabase?.auth.signOut() }}>
+          SIGN THIS DISPLAY OUT
+        </button>
+      )}
 
       {note && <p className="devpanel__note">{note}</p>}
     </div>

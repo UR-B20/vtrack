@@ -7,12 +7,12 @@
 --
 -- Revert with dev/simulate_policy_down.sql BEFORE any device is put at the gate.
 --
--- Why this is not a migration and not open-ended: the anon key ships in the browser on a
--- public GitHub Pages origin. An unscoped `anon can insert events` grant would let anyone
--- who views source push a green PROCEED onto the guard's screen. So both statements are
--- pinned to one device on one fake site, and the display's §6.1 realtime filter
+-- Why this is not a migration and not open-ended: since 0004 the display writes as its
+-- signed-in login (role 'display'), and an unscoped `display can insert events` grant
+-- would let that login push a green PROCEED onto the guard's screen. So both statements
+-- are pinned to one device on one fake site, and the display's §6.1 realtime filter
 -- (site=eq.<VITE_SITE>) makes those rows structurally unreachable from a real gate display
--- as long as VITE_SITE is not 'devlab'.
+-- as long as VITE_SITE is not 'devlab'. Sign in on /display?dev=1 first.
 
 -- The FK target the simulated events point at. Repeated here so this file works even if
 -- seed.sql has not been run.
@@ -20,19 +20,19 @@ insert into devices (id, role, name, site, lane, version)
 values ('sim-dev', 'capture', 'Simulate panel', 'devlab', 'A', 'dev')
 on conflict (id) do nothing;
 
--- anon needs the table privilege as well as the policy — 0002_policies.sql revoked it.
-grant insert, update on public.events to anon;
+-- The signed-in display needs the table privilege as well as the policy.
+grant insert, update on public.events to authenticated;
 
 drop policy if exists events_sim_insert on public.events;
 create policy events_sim_insert on public.events
-  for insert to anon
+  for insert to authenticated
   with check (device_id = 'sim-dev' and site = 'devlab');
 
 -- The UPDATE policy is not optional: the "re-read current vehicle" scenario is an UPDATE,
 -- and it is what exercises the §5.3 dedupe upgrade (check → allow) on the display.
 drop policy if exists events_sim_update on public.events;
 create policy events_sim_update on public.events
-  for update to anon
+  for update to authenticated
   using      (device_id = 'sim-dev' and site = 'devlab')
   with check (device_id = 'sim-dev' and site = 'devlab');
 
