@@ -85,6 +85,6 @@ def seen_plate_from_form(value: str | None) -> str | None:
     car back on the display."""
     if value is None or not value.strip():
         return None
-    if not SEEN_PLATE.match(value):
+    if not SEEN_PLATE.fullmatch(value):   # `$` alone would admit a trailing newline
         raise ValueError("seen_plate must be a plate_norm: A-Z and 0-9 only, at most 12")
     return value

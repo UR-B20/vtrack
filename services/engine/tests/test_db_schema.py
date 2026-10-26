@@ -37,6 +37,7 @@ SQL = [Path(__file__).with_name("pg_shims.sql"),
        REPO / "supabase/migrations/0003_foreign_reason.sql",
        REPO / "supabase/migrations/0004_display_sign_in.sql",
        REPO / "supabase/migrations/0005_device_tokens.sql",
+       REPO / "supabase/migrations/0006_vehicles_for_display.sql",
        REPO / "supabase/seed.sql"]
 CAM = Device("cam-a", "capture", "gate1", "A")
 DISPLAY = Device("display-b", "display", "gate1", "A")
@@ -221,10 +222,26 @@ class TestPublicKeyOpensNothing:
     @pytest.mark.parametrize("relation", ["public.vehicles_public", "public.devices_public",
                                           "public.events"])
     def test_a_login_without_a_role_sees_no_rows(self, db, an_event, relation):
-        # Anyone can create a Supabase login (admin sign-in creates users on first OTP);
-        # only the app_metadata role, which users cannot set themselves, opens anything.
+        # A login with no role (sign-ups are off and the admin form creates none, but a
+        # row could still exist); only the app_metadata role, which users cannot set
+        # themselves, opens anything.
         with as_user(db, "authenticated"):
             assert count(db, relation) == 0
+
+    def test_anon_cannot_call_the_display_function(self, db):
+        import psycopg
+        with as_user(db, "anon"), pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute("select * from public.vehicles_for_display()")
+
+    def test_a_login_without_a_role_gets_nothing_from_the_display_function(self, db):
+        with as_user(db, "authenticated"):
+            assert count(db, "public.vehicles_for_display()") == 0
+
+    def test_anon_holds_no_grant_on_any_public_table_or_view(self, db):
+        # What every policy file proves at its end, checked once more from the outside.
+        assert db.execute(
+            "select table_name, privilege_type from information_schema.role_table_grants "
+            "where grantee = 'anon' and table_schema = 'public'").fetchall() == []
 
 
 class TestDisplay:
@@ -239,6 +256,21 @@ class TestDisplay:
         import psycopg
         with as_user(db, "authenticated", "display"), pytest.raises(psycopg.errors.InsufficientPrivilege):
             db.execute("select token_hash from public.devices")
+
+    def test_has_no_path_to_the_base_table(self, db):
+        """0006: the list reaches the display only through vehicles_for_display(), which
+        returns the eight public columns. The base table — notes, created_by, ids — shows
+        the display login no rows at all."""
+        with as_user(db, "authenticated", "display"):
+            assert count(db, "public.vehicles") == 0
+            assert db.execute("select notes, created_by from public.vehicles").fetchall() == []
+            assert count(db, "public.vehicles_for_display()") > 0
+
+    def test_the_display_function_runs_as_its_owner_with_a_fixed_search_path(self, db):
+        row = db.execute(
+            "select p.prosecdef, p.proconfig, r.rolname from pg_proc p join pg_roles r on r.oid = p.proowner "
+            "where p.proname = 'vehicles_for_display'").fetchone()
+        assert row[0] is True and any(c.startswith("search_path=") for c in row[1]) and row[2] == "postgres"
 
     def test_presses_ok_on_a_real_event(self, db, an_event):
         with as_user(db, "authenticated", "display"):

@@ -51,8 +51,8 @@ grant  select (id, role, name, site, lane, last_seen_at, version) on public.devi
 --    permissive policies" check stays quiet too.
 -- ---------------------------------------------------------------------------
 -- vehicles: admin and display read; admin alone writes. The display reads the whole row
--- through vehicles_public's columns, but RLS cannot narrow columns, so keep anything
--- private out of `notes`.
+-- through vehicles_public's columns, but RLS cannot narrow columns — 0006 moves the
+-- display's read into a role-checking function and takes this policy back to admin only.
 drop policy if exists vehicles_admin_select  on public.vehicles;
 drop policy if exists vehicles_select        on public.vehicles;
 drop policy if exists vehicles_admin_insert  on public.vehicles;
@@ -117,3 +117,17 @@ create policy guard_actions_admin_select on public.guard_actions
 create index if not exists events_vehicle_id_idx      on public.events (vehicle_id);
 create index if not exists events_device_id_idx       on public.events (device_id);
 create index if not exists guard_actions_event_id_idx on public.guard_actions (event_id);
+
+-- Proof, as at the end of 0002: the public key holds nothing.
+do $$
+declare
+  bad text;
+begin
+  select string_agg(table_name || ' (' || privilege_type || ')', ', ' order by table_name)
+    into bad
+    from information_schema.role_table_grants
+   where grantee = 'anon' and table_schema = 'public';
+  if bad is not null then
+    raise exception 'anon still holds grants on public tables or views: %', bad;
+  end if;
+end $$;

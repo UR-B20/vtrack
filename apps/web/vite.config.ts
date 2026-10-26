@@ -1,8 +1,58 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * Content-Security-Policy for a production build, as a <meta> tag: GitHub Pages cannot set
+ * headers. It is the second line of defence against an injected script reaching the
+ * camera token or a signed-in session: only this origin's own scripts run, and the page may
+ * talk only to its Supabase project (REST, Auth, Realtime) and the engine. Not applied in
+ * `pnpm dev`, which needs HMR's inline script and websocket.
+ */
+export function cspContent(env: Record<string, string | undefined>): string {
+  const connect = ["'self'"]
+  for (const raw of [env.VITE_SUPABASE_URL, env.VITE_ENGINE_URL]) {
+    if (!raw) continue
+    try {
+      const u = new URL(raw)
+      connect.push(u.origin)
+      if (u.protocol === 'https:') connect.push(`wss://${u.host}`)
+      if (u.protocol === 'http:') connect.push(`ws://${u.host}`)
+    } catch {
+      /* not a URL: leave it out; the engine pill will say it is unreachable */
+    }
+  }
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    `connect-src ${connect.join(' ')}`,
+    "style-src 'self' 'unsafe-inline'",   // React inline style attributes
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "font-src 'self'",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ')
+}
+
+function csp(env: Record<string, string | undefined>): PluginOption {
+  return {
+    name: 'vtrack-csp',
+    apply: 'build',
+    transformIndexHtml() {
+      return [{
+        tag: 'meta',
+        attrs: { 'http-equiv': 'Content-Security-Policy', content: cspContent(env) },
+        injectTo: 'head-prepend',
+      }]
+    },
+  }
+}
 
 // GitHub Pages serves the app under /<repo>/. The deploy workflow sets PAGES_BASE;
 // locally and in `vite preview` it stays '/' so the dev server behaves normally.
@@ -28,6 +78,7 @@ export default defineConfig(({ command, mode }) => {
     base,
     plugins: [
       react(),
+      csp(env),
       VitePWA({
         // A new version waits until the screen is idle (src/lib/updates.ts): never mid-vehicle.
         registerType: 'prompt',

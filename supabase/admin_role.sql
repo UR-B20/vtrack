@@ -5,7 +5,11 @@
 -- it depends on a row that does not exist at migrate time, and it names one person.
 --
 -- ORDER MATTERS
---   1. Sign in to /admin once with email OTP. That is what CREATES the auth.users row.
+--   1. Create the admin's user in the dashboard: Authentication → Users → Add user →
+--      Create new user, the admin's email, any password (OTP sign-in never uses it), tick
+--      "Auto Confirm User". The sign-in form no longer creates accounts
+--      (shouldCreateUser: false), and the project's "Allow new users to sign up" switch
+--      should be OFF, so this is the only way an auth.users row comes to exist.
 --   2. Run this file. It must report one row; it raises if it matches nothing.
 --   3. Sign OUT and back IN. app_metadata is baked into the JWT when the token is issued,
 --      so an existing session keeps the old claim until it refreshes (1 h by default).
@@ -29,7 +33,7 @@ begin
 
   if v_id is null then
     raise exception
-      'No auth.users row for %. Sign in to /admin once with email OTP first, then re-run this file.',
+      'No auth.users row for %. Create the user under Authentication → Users first, then re-run this file.',
       v_email;
   end if;
 
