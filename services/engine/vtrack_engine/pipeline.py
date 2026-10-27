@@ -76,6 +76,42 @@ def band_from_roi(roi: str | None) -> PlateBand | None:
 
 
 SEEN_PLATE = re.compile(r"^[A-Z0-9]{1,12}$")
+MAX_FRAME_NO = 99
+
+
+def complete(interp: Interpretation) -> bool:
+    """A whole plate, read as it is: a Singapore plate whose check letter fits, or a MID
+    plate. Not complete: part of a plate, a dropped or wrong check letter, a read that
+    only fits after correction, and anything foreign-shaped (a Singapore plate missing its
+    last letter looks foreign)."""
+    if interp.repaired_from is not None:
+        return False
+    return interp.plate_kind == "mid" or (interp.plate_kind == "civilian" and interp.checksum_ok)
+
+
+def hold_partial(interp: Interpretation, frame: int | None, seen_plate: str | None,
+                 hold_frames: int) -> bool:
+    """Owner's call (27 Oct 2026): the gate must not show half a plate while the car is
+    still pulling in. An incomplete read writes nothing — /capture keeps sending — until
+    the vehicle's `hold_frames`-th frame, after which the best the camera can do is shown
+    in orange for the guard. While /capture says a car already answered for is still there
+    (`seen_plate`), an incomplete read never replaces that answer. A frame with no number
+    (a TAP, an older /capture) is decided as before."""
+    if complete(interp):
+        return False
+    if seen_plate is not None:
+        return True
+    return frame is not None and frame < hold_frames
+
+
+def frame_from_form(value: str | None) -> int | None:
+    """/recognise's optional `frame`: which frame of this vehicle this is, from 1. Raises
+    ValueError for anything else, as for `seen_plate`."""
+    if value is None or not value.strip():
+        return None
+    if not re.fullmatch(r"[1-9][0-9]?", value):
+        raise ValueError(f"frame must be a whole number from 1 to {MAX_FRAME_NO}")
+    return int(value)
 
 
 def seen_plate_from_form(value: str | None) -> str | None:

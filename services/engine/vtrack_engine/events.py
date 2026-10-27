@@ -83,6 +83,7 @@ def no_plate_response(latency_ms: int, rejected: str | None = None) -> dict[str,
     """Nothing readable in position in the frame. No event is written: an empty tap must not
     put amber on the guard's screen. `rejected` says why plates that WERE seen were not
     read — "edge", "size" or "multiple_plates" (alpr/base.py select) — so /capture can say
-    so while the ROI is being set up."""
+    so while the ROI is being set up — or "partial": a plate was read, but not whole, and it
+    is held back for a clearer frame (pipeline.py hold_partial)."""
     return {"event_id": None, "decision": None, "reason": None, "plate_norm": None,
             "rejected": rejected, "latency_ms": latency_ms, "deduped": False}

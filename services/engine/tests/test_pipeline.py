@@ -7,7 +7,14 @@ import pytest
 from tests.conftest import TODAY
 from vtrack_engine.alpr.base import PlateBand
 from vtrack_engine.decide import Thresholds, interpret
-from vtrack_engine.pipeline import band_from_roi, conclude, lookups
+from vtrack_engine.pipeline import (
+    band_from_roi,
+    complete,
+    conclude,
+    frame_from_form,
+    hold_partial,
+    lookups,
+)
 
 TH = Thresholds()
 
@@ -83,3 +90,44 @@ class TestBandFromRoi:
     def test_malformed_is_an_error_not_silence(self, roi):
         with pytest.raises(ValueError, match="roi"):
             band_from_roi(roi)
+
+
+class TestHoldPartial:
+    """Owner's call (27 Oct 2026): no half plate on the gate screen while the car pulls in."""
+
+    @pytest.mark.parametrize(("text", "whole"), [
+        ("SBA1234G", True),     # checksum fits
+        ("MID12345", True),
+        ("SBA1234", False),     # check letter not read yet: foreign-shaped
+        ("SBA12", False),       # part of a plate
+        ("SMW3562P", False),    # wrong check letter
+        ("SG2O17C", False),     # fits only after correction
+        ("SB", False),          # two letters, nothing else
+        ("JHA1234", False),     # a real foreign plate waits too
+    ])
+    def test_complete(self, text, whole):
+        assert complete(interpret(text, 0.95, TH)) is whole
+
+    def test_a_part_plate_is_held_until_the_hold_frame(self):
+        part = interpret("SBA12", 0.95, TH)
+        assert [hold_partial(part, n, None, 6) for n in (1, 5, 6, 12)] == [True, True, False, False]
+
+    def test_a_whole_plate_is_never_held(self):
+        whole = interpret("SBA1234G", 0.95, TH)
+        assert not hold_partial(whole, 1, None, 6)
+        assert not hold_partial(whole, 1, "SKN8821R", 6)
+
+    def test_a_tap_or_older_capture_decides_as_before(self):
+        assert not hold_partial(interpret("SBA12", 0.95, TH), None, None, 6)
+
+    def test_while_a_car_answered_for_is_there_a_part_read_never_replaces_it(self):
+        assert hold_partial(interpret("SMW3562P", 0.95, TH), 12, "SMW3562A", 6)
+
+    @pytest.mark.parametrize(("value", "n"), [(None, None), ("", None), ("1", 1), ("12", 12), ("99", 99)])
+    def test_frame_from_form(self, value, n):
+        assert frame_from_form(value) == n
+
+    @pytest.mark.parametrize("value", ["0", "100", "-1", "1.5", "a", "01", "6\n"])
+    def test_a_malformed_frame_is_refused(self, value):
+        with pytest.raises(ValueError, match="frame"):
+            frame_from_form(value)

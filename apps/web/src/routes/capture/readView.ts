@@ -39,6 +39,10 @@ const REJECTED: Record<NonNullable<RecogniseResult['rejected']>, { word: string;
     word: 'PLATE NOT AT THE STOP LINE',
     detail: 'The plate is bigger or smaller than one at the stop line: a car nearer or further away. Set the plate size again if the stop line moved.',
   },
+  partial: {
+    word: 'PLATE NOT FULLY READ',
+    detail: 'Only part of the plate, or a wrong check letter. Nothing goes to the gate yet; the next frame tries again.',
+  },
   multiple_plates: {
     word: 'TWO PLATES IN THE LANE BOX',
     detail: 'More than one plate is inside the lane box, so nothing was decided. Tighten the box around the stop line.',
