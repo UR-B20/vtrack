@@ -38,6 +38,13 @@ settles again, to tell a lookalike car pulled in nose to tail from the same car.
 the window that read refines the event as above. Outside it there is nothing to refine,
 and inserting would put the same car back on the display with a chime, so nothing is
 written (`Skip`).
+
+A misread of that car (27 Oct 2026, found at the gate): `SMW 3562 A` was answered, and the
+re-read came back `SMW 3562 P`, which fails the checksum. A different plate is a new
+vehicle, so it was inserted and its orange "Plate not recognised" replaced the right
+answer on the display. Now an undecided read (`check`) one character away from the plate
+already answered for is that same car read badly, and writes nothing. A decided read of a
+different plate is still a new vehicle.
 """
 
 from dataclasses import dataclass, field
@@ -94,6 +101,22 @@ def _should_adopt(existing: OpenEvent, candidate: dict[str, Any]) -> bool:
     return new_decision == existing.decision and candidate["confidence"] > old_conf
 
 
+def one_char_apart(a: str, b: str) -> bool:
+    """One character changed, added or dropped (and not equal)."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def _misread_of(seen_plate: str | None, candidate: dict[str, Any]) -> bool:
+    plate = candidate.get("plate_norm")
+    return (seen_plate is not None and candidate["decision"] == "check"
+            and isinstance(plate, str) and one_char_apart(plate, seen_plate))
+
+
 def merge(existing: OpenEvent | None, candidate: dict[str, Any], now: datetime,
           dedupe_s: float, seen_plate: str | None = None) -> Insert | Update | Skip:
     """`candidate` is the full row this read would insert. `existing` is the store's answer
@@ -106,6 +129,8 @@ def merge(existing: OpenEvent | None, candidate: dict[str, Any], now: datetime,
         or existing.last_read_at < window_start(now, dedupe_s)
     ):
         if seen_plate is not None and candidate["plate_norm"] == seen_plate:
+            return Skip()
+        if _misread_of(seen_plate, candidate):
             return Skip()
         return Insert(candidate)
 

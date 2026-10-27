@@ -15,8 +15,13 @@ describe('readView', () => {
     expect(JSON.stringify(v)).not.toMatch(/Tan|HQ Coy|permanent/)
   })
 
-  it('deny carries its reason', () => {
-    expect(readView({ ...base, decision: 'deny', reason: 'expired' })).toMatchObject({ tone: 'deny', word: 'DENIED', detail: 'Pass expired' })
+  it('a refusal the guard checks is amber, as on the gate screen', () => {
+    expect(readView({ ...base, decision: 'deny', reason: 'expired' })).toMatchObject({ tone: 'check', word: 'VERIFY', detail: 'Pass expired' })
+    expect(readView({ ...base, decision: 'deny', reason: 'not_on_list' })).toMatchObject({ tone: 'check', word: 'VERIFY', detail: 'Not on the list' })
+  })
+
+  it('only a foreign plate is red', () => {
+    expect(readView({ ...base, decision: 'deny', reason: 'foreign', plate_display: 'JHA 1234' })).toMatchObject({ tone: 'deny', word: 'DENIED', detail: 'Foreign plate' })
   })
 
   it('check carries its reason and the repair', () => {
@@ -35,6 +40,7 @@ describe('readView', () => {
 
   it('says why plates that were seen were not read, still never amber', () => {
     const none = { ...base, decision: null, reason: null, plate_norm: null, event_id: null }
+    expect(readView({ ...none, rejected: 'partial' })).toMatchObject({ tone: 'none', word: 'PLATE NOT FULLY READ' })
     expect(readView({ ...none, rejected: 'multiple_plates' })).toMatchObject({ tone: 'none', word: 'TWO PLATES IN THE LANE BOX' })
     expect(readView({ ...none, rejected: 'edge' }).word).toBe('PLATE AT THE EDGE')
     expect(readView({ ...none, rejected: 'size' }).word).toBe('PLATE NOT AT THE STOP LINE')

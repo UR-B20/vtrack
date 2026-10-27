@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     repair_max_subs: int = 2
     rate_limit_per_s: int = 5
     max_frame_age_s: float = 10
+    # A part plate or a misread is not shown until this frame of a vehicle (pipeline.py
+    # hold_partial). /capture bursts 2 frames/s, so 6 is about 2.5 s after the car arrives.
+    partial_hold_frames: int = 6
 
     # A comma-separated list in .env (§7). NoDecode stops pydantic-settings trying to parse
     # it as JSON — which is what it does to any list field, and which would make the

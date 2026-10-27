@@ -21,7 +21,7 @@ export interface RecogniseResult {
   flags?: { verify: boolean }
   bbox?: [number, number, number, number] | null
   /** Why plates that were seen were not read (engine alpr/base.py select). */
-  rejected?: 'edge' | 'size' | 'multiple_plates' | null
+  rejected?: 'edge' | 'size' | 'multiple_plates' | 'partial' | null
   latency_ms: number
   deduped: boolean
 }
@@ -93,7 +93,7 @@ const SEEN_PLATE = /^[A-Z0-9]{1,12}$/
 
 export async function recognise(
   baseUrl: string, pairing: Pairing, frame: Blob, capturedAt: Date, roi: string | null = null,
-  seenPlate: string | null = null, timeoutMs = 8000,
+  seenPlate: string | null = null, frameNo: number | null = null, timeoutMs = 8000,
 ): Promise<RecogniseResult> {
   const form = new FormData()
   form.append('image', frame, 'frame.jpg')
@@ -105,6 +105,9 @@ export async function recognise(
   // a re-read of it writes no new event. Only ever a plate_norm: the engine refuses anything
   // else, and a refused hint would fail every frame for the vehicle.
   if (seenPlate && SEEN_PLATE.test(seenPlate)) form.append('seen_plate', seenPlate)
+  // Which frame of this vehicle, from 1: early frames that read only part of a plate are
+  // held back by the engine (pipeline.py hold_partial). A TAP sends none and decides at once.
+  if (frameNo && Number.isInteger(frameNo) && frameNo >= 1 && frameNo <= 99) form.append('frame', String(frameNo))
   const res = await request(join(baseUrl, '/recognise'), {
     method: 'POST', headers: { 'X-Device-Token': pairing.token }, body: form,
   }, timeoutMs)

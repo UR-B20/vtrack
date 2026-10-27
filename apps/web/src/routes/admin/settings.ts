@@ -16,6 +16,8 @@ const THRESHOLDS: { key: string; env: string; label: string; unit?: string; mean
     meaning: 'How many look-alike characters (0/O, 8/B…) may be swapped to fit a Singapore plate. A corrected read is always orange.' },
   { key: 'max_frame_age_s', env: 'MAX_FRAME_AGE_S', label: 'Oldest photo accepted', unit: 's',
     meaning: 'A photo older than this when it arrives is refused, so a late one cannot decide for the next car.' },
+  { key: 'partial_hold_frames', env: 'PARTIAL_HOLD_FRAMES', label: 'Wait for a whole plate',
+    meaning: 'Part of a plate or a misread is not shown until this frame of a vehicle (about 2.5 s at 6); a whole plate shows at once.' },
   { key: 'rate_limit_per_s', env: 'RATE_LIMIT_PER_S', label: 'Requests per second', unit: '/s',
     meaning: 'Per device token; more are refused.' },
   { key: 'detector_conf', env: 'ALPR_DETECTOR_CONF', label: 'Plate detector',

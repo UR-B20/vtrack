@@ -162,7 +162,7 @@ export function CameraView({ engineUrl, pairing, onUnpair }: Props) {
           : `tap-${vehicleTag(capturedAt)}`
         downloadFrame(fitted.blob, target ? `${tag}-${String(target.n).padStart(2, '0')}.jpg` : `${tag}.jpg`)
       }
-      const result = await recognise(engineUrl, pairing, fitted.blob, capturedAt, roiField(band), target?.seen ?? null)
+      const result = await recognise(engineUrl, pairing, fitted.blob, capturedAt, roiField(band), target?.seen ?? null, target?.n ?? null)
       if (target) {
         dispatch({
           type: 'result', session: target.session, outcome: outcomeOf(result), plate: result.plate_norm, now: performance.now(),

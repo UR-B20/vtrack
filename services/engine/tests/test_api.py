@@ -335,6 +335,27 @@ class TestRefinement:
         body = rig.frame("SNB9538E", seen_plate="SBA1234G").json()
         assert body["event_id"] and len(rig.events) == 2
 
+    def test_a_part_plate_early_in_the_burst_writes_nothing(self, rig):
+        body = rig.frame("SB", frame="2").json()
+        assert (body["event_id"], body["decision"], body["rejected"]) == (None, None, "partial")
+        assert rig.events == []
+
+    def test_a_part_plate_from_the_hold_frame_on_goes_to_the_guard(self, rig):
+        body = rig.frame("SB", frame="6").json()
+        assert body["event_id"] and body["decision"] == "check"
+
+    def test_a_whole_plate_decides_on_the_first_frame(self, rig):
+        assert rig.frame("SBA1234G", frame="1").json()["decision"] == "allow"
+
+    def test_a_misread_of_the_car_still_there_never_replaces_its_answer(self, rig):
+        rig.frame("SKN8821R", frame="1")
+        body = rig.frame("SKN8821P", frame="9", seen_plate="SKN8821R").json()
+        assert body["rejected"] == "partial" and len(rig.events) == 1
+
+    def test_a_malformed_frame_is_refused(self, rig):
+        r = rig.frame("SBA1234G", frame="0")
+        assert r.status_code == 422 and "frame" in r.json()["detail"]
+
     @pytest.mark.parametrize("seen", ["sba1234g", "SBA 1234 G", "SBA1234G;--", "A" * 13])
     def test_a_malformed_seen_plate_is_refused_not_ignored(self, rig, seen):
         r = rig.frame("SBA1234G", seen_plate=seen)

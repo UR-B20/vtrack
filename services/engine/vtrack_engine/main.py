@@ -61,7 +61,14 @@ from .decide import Interpretation, decide, interpret
 from .dedupe import Insert, Skip, merge, window_start
 from .events import new_event_row, no_plate_response, response_from_row
 from .images import MAX_BYTES, ImageRejected, validate_jpeg
-from .pipeline import band_from_roi, conclude, lookups, seen_plate_from_form
+from .pipeline import (
+    band_from_roi,
+    conclude,
+    frame_from_form,
+    hold_partial,
+    lookups,
+    seen_plate_from_form,
+)
 from .plates import CIVILIAN, checksum_letter, classify
 
 VERSION = "m2"
@@ -301,6 +308,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         captured_at: Annotated[str | None, Form()] = None,
         roi: Annotated[str | None, Form()] = None,
         seen_plate: Annotated[str | None, Form()] = None,
+        frame: Annotated[str | None, Form()] = None,
         x_device_token: Annotated[str | None, Header()] = None,
     ) -> JSONResponse:
         t0 = time.perf_counter()
@@ -314,6 +322,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         try:
             band = band_from_roi(roi)
             seen = seen_plate_from_form(seen_plate)
+            frame_no = frame_from_form(frame)
         except ValueError as exc:
             raise ApiError(422, str(exc)) from exc
 
@@ -332,6 +341,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
         # The same pure steps the real-model tests run (pipeline.py); only the lookups are I/O.
         th = settings.thresholds
         interp = interpret(chosen.text, chosen.confidence, th)
+        if hold_partial(interp, frame_no, seen, settings.partial_hold_frames):
+            return JSONResponse(no_plate_response(_ms(t0), "partial"))
         plates = lookups(interp)
         found = await asyncio.gather(*(store.get_vehicle(p) for p in plates))
         outcome = conclude(interp, dict(zip(plates, found, strict=True)), today_at_gate(), th)
@@ -418,6 +429,7 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
                 "conf_decide": settings.conf_decide, "conf_check": settings.conf_check,
                 "dedupe_s": settings.dedupe_s, "repair_max_subs": settings.repair_max_subs,
                 "max_frame_age_s": settings.max_frame_age_s,
+                "partial_hold_frames": settings.partial_hold_frames,
                 "rate_limit_per_s": settings.rate_limit_per_s,
                 "detector_conf": settings.alpr_detector_conf,
             },
