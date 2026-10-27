@@ -15,8 +15,13 @@ describe('readView', () => {
     expect(JSON.stringify(v)).not.toMatch(/Tan|HQ Coy|permanent/)
   })
 
-  it('deny carries its reason', () => {
-    expect(readView({ ...base, decision: 'deny', reason: 'expired' })).toMatchObject({ tone: 'deny', word: 'DENIED', detail: 'Pass expired' })
+  it('a refusal the guard checks is amber, as on the gate screen', () => {
+    expect(readView({ ...base, decision: 'deny', reason: 'expired' })).toMatchObject({ tone: 'check', word: 'VERIFY', detail: 'Pass expired' })
+    expect(readView({ ...base, decision: 'deny', reason: 'not_on_list' })).toMatchObject({ tone: 'check', word: 'VERIFY', detail: 'Not on the list' })
+  })
+
+  it('only a foreign plate is red', () => {
+    expect(readView({ ...base, decision: 'deny', reason: 'foreign', plate_display: 'JHA 1234' })).toMatchObject({ tone: 'deny', word: 'DENIED', detail: 'Foreign plate' })
   })
 
   it('check carries its reason and the repair', () => {

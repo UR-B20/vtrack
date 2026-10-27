@@ -4,7 +4,16 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from vtrack_engine.dedupe import ADOPTABLE, Insert, OpenEvent, Skip, Update, merge, window_start
+from vtrack_engine.dedupe import (
+    ADOPTABLE,
+    Insert,
+    OpenEvent,
+    Skip,
+    Update,
+    merge,
+    one_char_apart,
+    window_start,
+)
 
 NOW = datetime(2026, 9, 22, 6, 0, 0, tzinfo=UTC)
 DEDUPE_S = 15
@@ -129,3 +138,40 @@ class TestSeenPlate:
     def test_a_different_plate_is_a_new_vehicle(self):
         c = candidate(plate_norm="SBA1234G", plate_raw="SBA1234G")
         assert merge(None, c, NOW, DEDUPE_S, seen_plate="SNB9538E") == Insert(c)
+
+    def test_an_undecided_misread_of_the_answered_plate_writes_nothing(self):
+        # Found at the gate: SMW3562A answered, the re-read gave SMW3562P (checksum fails),
+        # and its orange replaced the right answer on the display.
+        bad = candidate(plate_norm="SNB9538P", plate_raw="SNB9538P", decision="check",
+                        reason="unreadable", vehicle_id=None)
+        assert merge(None, bad, NOW, DEDUPE_S, seen_plate="SNB9538E") == Skip()
+        dropped = candidate(plate_norm="SNB9538", plate_raw="SNB9538", decision="check",
+                            reason="ambiguous", vehicle_id=None)
+        assert merge(None, dropped, NOW, DEDUPE_S, seen_plate="SNB9538E") == Skip()
+
+    def test_a_decided_read_one_character_away_is_still_a_new_vehicle(self):
+        c = candidate(plate_norm="SNB9517R", plate_raw="SNB9517R")
+        assert merge(None, c, NOW, DEDUPE_S, seen_plate="SNB9518R") == Insert(c)
+
+    def test_an_undecided_read_of_a_quite_different_plate_is_a_new_vehicle(self):
+        c = candidate(plate_norm="SBA1234F", plate_raw="SBA1234F", decision="check",
+                      reason="unreadable", vehicle_id=None)
+        assert merge(None, c, NOW, DEDUPE_S, seen_plate="SNB9538E") == Insert(c)
+
+    def test_without_seen_plate_nothing_is_skipped(self):
+        c = candidate(plate_norm="SNB9538P", plate_raw="SNB9538P", decision="check",
+                      reason="unreadable", vehicle_id=None)
+        assert merge(None, c, NOW, DEDUPE_S) == Insert(c)
+
+
+@pytest.mark.parametrize(("a", "b", "near"), [
+    ("SMW3562A", "SMW3562P", True),   # one changed
+    ("SNB9538", "SNB9538E", True),    # one dropped
+    ("SNB9538EE", "SNB9538E", True),  # one added
+    ("SNB9538E", "SNB9538E", False),  # the same
+    ("SNB9538E", "SNB9583E", False),  # two changed
+    ("SNB95E", "SNB9538E", False),    # two dropped
+])
+def test_one_char_apart(a, b, near):
+    assert one_char_apart(a, b) is near
+    assert one_char_apart(b, a) is near
