@@ -51,6 +51,8 @@ pnpm typecheck
 
 Paste these into the Supabase SQL editor **in order**:
 
+> Supabase's GitHub integration may be connected, but keep its **Deploy to production** OFF: these files were applied by hand, so the project's migration history is empty and an auto-deploy would try to re-run `0001` (CLAUDE.md §11, Migrations by hand).
+
 | # | File | |
 |---|---|---|
 | 1 | `supabase/migrations/0001_init.sql` | Schema. |

@@ -13,9 +13,9 @@ dependencies = [
   "slowapi==0.1.10",
   "python-multipart==0.0.32",
   "fast-alpr[onnx]==0.4.0",
-  # fast-alpr 0.4 only floors opencv at 4.9, so an unpinned resolve picks 5.0 — a major
-  # version fast-alpr was not built against, and one no test here can exercise without
-  # running the model. Lift this once a real read has been confirmed on 5.x.
+  # fast-alpr 0.4 only floors opencv at 4.9. 5.x was confirmed on 27 Oct 2026 (Dependabot
+  # #20): the slow real-model tests and CI's offline image read a real plate on 5.0.0. The cap
+  # stays one major ahead, so 6.x waits for the same check.
   "opencv-python-headless>=4.9,<6",
 ]
 
