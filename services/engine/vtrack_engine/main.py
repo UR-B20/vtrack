@@ -8,6 +8,11 @@ main.py — the VTrack Engine's HTTP surface (CLAUDE.md §5.5).
     GET  /ready       none                       may this instance take the gate? (Render)
 
 Order inside /recognise is deliberate:
+  0. RequestGuard, before a byte of the body is read: FastAPI parses a multipart or JSON
+     body BEFORE the handler and its auth run, and Starlette spools file parts to disk with
+     no cap, so without this anyone could post gigabytes to a public route. A POST with no
+     X-Device-Token header, no Content-Length, or a Content-Length over the route's cap is
+     refused from the headers alone;
   1. the cheap refusals (token, rate, image, frame age) before anything expensive;
   2. inference in a worker thread, OUTSIDE any lock — it is the slow part;
   3. a per-(site, lane) lock around ONLY read-open-event → merge → write, so two frames of
@@ -41,9 +46,11 @@ from fastapi import FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .alpr import ALPR, ALPRError, build_alpr, select
 from .auth import AuthError, Device, DeviceRegistry, check_claim
@@ -64,6 +71,15 @@ VERSION = "m2"
 # paired with a new token works within seconds, and random tokens cannot hammer the DB.
 DEVICE_REFRESH_S = 30.0
 DEVICE_RETRY_S = 5.0
+# The most a POST body may declare, per route, checked from Content-Length before the body is
+# read (RequestGuard). /recognise: the frame (images.py MAX_BYTES) plus room for the other
+# form fields and the multipart framing; the JSON routes carry a few hundred bytes.
+JSON_BODY_LIMIT = 16 * 1024
+BODY_LIMITS = {
+    "/recognise": MAX_BYTES + JSON_BODY_LIMIT,
+    "/manual": JSON_BODY_LIMIT,
+    "/heartbeat": JSON_BODY_LIMIT,
+}
 log = logging.getLogger("vtrack.engine")
 
 
@@ -104,18 +120,56 @@ def _token_key(request: Request) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:16]
 
 
+def guard_problem(headers: Headers, limit: int) -> tuple[int, str] | None:
+    """Why a POST should be refused from its headers alone, as (status, detail), or None.
+    Pure, so it is tested without a request."""
+    if not headers.get("x-device-token"):
+        return 401, "missing X-Device-Token"
+    length = headers.get("content-length")
+    if length is None:
+        return 411, "Content-Length is required"
+    try:
+        declared = int(length)
+    except ValueError:
+        return 400, "Content-Length is not a number"
+    if declared > limit:
+        return 413, (f"request body is {declared // 1024} KB; the limit for this route is "
+                     f"{limit // 1024} KB")
+    return None
+
+
+class RequestGuard:
+    """Pure ASGI middleware: the refusals that need no body (module docstring, step 0).
+    Inside CORS, so a browser can read the refusal."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("method") == "POST":
+            limit = BODY_LIMITS.get(scope["path"])
+            if limit is not None:
+                problem = guard_problem(Headers(scope=scope), limit)
+                if problem is not None:
+                    status, detail = problem
+                    await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
+
+
 class ManualBody(BaseModel):
-    device_id: str | None = None
-    plate_text: str
-    actor: str | None = None
-    event_id: str | None = None      # the event being confirmed; the stale-confirm check is M3
+    device_id: str | None = Field(None, max_length=64)
+    plate_text: str = Field(max_length=32)
+    actor: str | None = Field(None, max_length=64)
+    # The event being confirmed; the stale-confirm check is M3.
+    event_id: str | None = Field(None, max_length=64)
 
 
 class HeartbeatBody(BaseModel):
-    device_id: str | None = None
-    role: str | None = None
-    version: str | None = None
-    stats: dict[str, Any] | None = None
+    device_id: str | None = Field(None, max_length=64)
+    role: str | None = Field(None, max_length=16)
+    version: str | None = Field(None, max_length=64)
+    stats: dict[str, Any] | None = None     # never stored; bounded by the body cap
 
 
 def create_app(settings: Settings | None = None, store: EventStore | None = None,
@@ -170,6 +224,8 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
     app.state.engine = EngineState(settings=settings, store=store,
                                    registry=DeviceRegistry(settings.device_tokens), alpr=alpr)
 
+    # Added first, so CORS (added after) wraps it: a refusal still carries the CORS headers.
+    app.add_middleware(RequestGuard)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -193,11 +249,21 @@ def create_app(settings: Settings | None = None, store: EventStore | None = None
     @app.exception_handler(ImageRejected)
     @app.exception_handler(StoreError)
     async def _known(request: Request, exc: Any) -> JSONResponse:
-        status = exc.status
-        # A store failure is a failure of THIS engine to reach its database: 502/503/504.
-        if isinstance(exc, StoreError) and not 500 <= status < 600:
-            status = 502
-        return JSONResponse({"detail": exc.detail}, status_code=status)
+        status, detail = exc.status, exc.detail
+        if isinstance(exc, StoreError):
+            # A store failure is a failure of THIS engine to reach its database: 502/503/504.
+            # Supabase's own words go to the log (and to /health for a paired device); the
+            # client gets the coarse reason, never a table, constraint or key name.
+            log.warning("store failed (%s): %s", status, detail)
+            if status in (401, 403):
+                detail = "the engine's database refused its key"
+            elif status == 504:
+                detail = "the engine's database did not answer in time"
+            else:
+                detail = "the engine could not reach its database"
+            if not 500 <= status < 600:
+                status = 502
+        return JSONResponse({"detail": detail}, status_code=status)
 
     def state_of(request: Request) -> EngineState:
         return request.app.state.engine

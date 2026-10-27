@@ -21,7 +21,7 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY         # the SECRET key (sb_secret_…), never the publishable one
         sync: false
-      - key: DEVICE_TOKENS                # {"cam-a":"…","display-b":"…"}, as in services/engine/.env
+      - key: DEVICE_TOKENS                # {"cam-a":"…"}, as in services/engine/.env (the camera only)
         sync: false
       - key: ALPR_ENGINE
         value: local

@@ -19,7 +19,7 @@ class TestEnvFile:
         # ALLOWED_ORIGINS documented in .env.example would crash startup without NoDecode.
         s = Settings(_env_file=REPO / ".env.example")
         assert s.allowed_origins == ["http://localhost:5173", "https://ur-b20.github.io"]
-        assert set(s.device_tokens) == {"cam-a", "display-b"}
+        assert set(s.device_tokens) == {"cam-a"}      # the camera only: the display signs in
         assert (s.conf_decide, s.conf_check, s.dedupe_s, s.repair_max_subs) == (0.85, 0.60, 15, 2)
         assert s.alpr_engine == "local"
 

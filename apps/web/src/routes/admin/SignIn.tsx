@@ -9,7 +9,20 @@ import { absoluteHref } from '../../lib/router'
  * `vehicles` has no anon policy at all, and every admin read goes through a JWT whose
  * app_metadata.role is 'admin'. That claim is granted by supabase/admin_role.sql and is
  * baked in at token issue, so a fresh sign-in is required after it is first set.
+ *
+ * Existing users only (CLAUDE.md §11, Security review): `shouldCreateUser: false`, so this
+ * form cannot create accounts. An unknown address gets Supabase's "Signups not allowed"
+ * and is told who to ask. The admin's user is created in the dashboard (README, Set up
+ * Supabase); the project's own "Allow new users to sign up" switch should be off too.
  */
+
+/** Supabase's wording for an email that has no user, when sign-ups are off. */
+export function explainSendError(message: string): string {
+  if (/signups? not allowed/i.test(message)) {
+    return 'No admin account for this email. Accounts are created in the Supabase dashboard, not here.'
+  }
+  return message
+}
 export function SignIn() {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -25,10 +38,10 @@ export function SignIn() {
       // The emailed link comes back here, not to the project's Site URL. Supabase honours
       // it only if it matches Authentication → URL Configuration → Redirect URLs
       // (https://ur-b20.github.io/vtrack/**); otherwise it falls back to the Site URL.
-      options: { shouldCreateUser: true, emailRedirectTo: absoluteHref('admin', window.location.origin) },
+      options: { shouldCreateUser: false, emailRedirectTo: absoluteHref('admin', window.location.origin) },
     })
     setBusy(false)
-    if (error) setError(error.message)
+    if (error) setError(explainSendError(error.message))
     else setSent(true)
   }
 

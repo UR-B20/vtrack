@@ -1,0 +1,21 @@
+# Dependabot: one pull request a week per ecosystem, so a Pillow-class advisory (CLAUDE.md
+# §11, Security review) arrives as a PR rather than being found by hand. CI's pip-audit and
+# pnpm audit are the backstop between runs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      web: { patterns: ["*"] }
+  - package-ecosystem: uv
+    directory: /services/engine
+    schedule: { interval: weekly }
+    groups:
+      engine: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /services/engine
+    schedule: { interval: weekly }

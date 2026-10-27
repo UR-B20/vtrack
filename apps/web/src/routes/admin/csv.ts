@@ -201,9 +201,16 @@ export function importableRows(rows: ImportRow[]) {
     }))
 }
 
+/** A cell Excel or Sheets would run as a formula: it starts with =, +, -, @, a tab or a CR.
+ *  Prefixed with an apostrophe (the spreadsheet convention for "text") and quoted, so an
+ *  exported list opened on the admin's machine runs nothing. */
+export const FORMULA_LEAD = /^[=+\-@\t\r]/
+
 function escapeCsv(value: string | null | undefined): string {
-  const v = value ?? ''
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
+  let v = value ?? ''
+  const lead = FORMULA_LEAD.test(v)
+  if (lead) v = `'${v}`
+  return lead || /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
 }
 
 export interface ExportableVehicle {

@@ -58,15 +58,19 @@ Paste these into the Supabase SQL editor **in order**:
 | 3 | `supabase/migrations/0003_foreign_reason.sql` | Adds the `foreign` deny reason (only Singapore plates are admitted). Re-runnable. **An existing project:** run this before the engine that writes it deploys. |
 | 4 | `supabase/migrations/0004_display_sign_in.sql` | The public key opens nothing; the display signs in (below). Also clears the Supabase advisor warnings. Re-runnable. **Re-run it after any re-run of 0002**, which would reopen the old access. |
 | 5 | `supabase/migrations/0005_device_tokens.sql` | Lets the admin Devices page set a camera's token (below); without it that page says so. Re-runnable. |
-| 6 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
-| 7 | — | First, **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". Then **sign in to `/admin` once with email OTP.** This creates your `auth.users` row. |
-| 8 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then **sign out and back in**. |
-| 9 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
-| 10 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
+| 6 | `supabase/migrations/0006_vehicles_for_display.sql` | The display reads the list through a role-checking function, never the base table (so a signed-in phone cannot read `notes` or anything beyond the eight columns on screen). Re-runnable. |
+| 7 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
+| 8 | — | **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". |
+| 9 | — | **Authentication → Sign In / Providers**: turn **Allow new users to sign up** OFF (the sign-in form cannot create accounts either). Turn on a CAPTCHA (Attack Protection) if the plan offers it. Then **create the admin's user**: Authentication → Users → **Add user → Create new user**, the admin's email, any password (the OTP sign-in never uses it), tick **Auto Confirm User**. |
+| 10 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then sign in to `/admin` with the emailed code. If you were already signed in, **sign out and back in**. |
+| 11 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
+| 12 | `supabase/display_role.sql` | Replace `display@example.com` (two places) with that email and run. Then sign in on phone B's `/display` with it, once. |
 
 Also turn on **Authentication → (Sign In / Providers →) Email → Prevent use of leaked passwords** if your plan offers it. The display login is the one account with a password.
 
-Steps 8 and 10's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
+Steps 10 and 12's order matters: `app_metadata` is baked into the JWT when the token is issued, so an existing session keeps the old claim until it refreshes. Signing out and back in is the fix — do not loosen the policies to work around it.
+
+Every policy file ends by **proving the public key holds nothing** — it raises if any `anon` grant exists on a public table or view. `0002` no longer grants `anon` anything, and on a database that already has `0004` it stops with a message instead of putting the old policies back; `0004`, `0005` and `0006` are the ones to re-run.
 
 Then create `apps/web/.env` from [`.env.example`](.env.example):
 
@@ -78,6 +82,8 @@ VITE_LANE=A
 ```
 
 The anon key is public by design — it ships in the browser — so since `0004` it may do nothing at all: no reads, no writes. Everything the display sees comes through its own login (role `display`), and the admin console through the admin login. The service key never leaves the engine's host secrets.
+
+> **One origin per site.** `https://ur-b20.github.io` is a single browser origin shared by *every* repository the `ur-b20` account publishes to GitHub Pages, so any other such site could read this app's stored camera token, signed-in sessions and offline list. Until the app has its own custom domain (Settings → Pages → Custom domain; then update `ALLOWED_ORIGINS` on Render and the Supabase URLs above), **no other repository in this account may enable Pages.**
 
 > Supabase's free tier **pauses after 7 idle days**. From M3 the engine's heartbeats keep it awake; until then, check the dashboard before a demo.
 
@@ -99,7 +105,7 @@ The engine runs on your laptop next to `pnpm dev`. Windows PowerShell shown; mac
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # installs uv; reopen PowerShell after
 cd services\engine
 uv sync                                                                              # Python 3.12 + everything, first time ~2 min
-uv run python -c "import secrets; print(secrets.token_urlsafe(24))"                  # run twice: one token per device
+uv run python -c "import secrets; print(secrets.token_urlsafe(24))"                  # the camera's token
 ```
 
 Create `services\engine\.env` (git-ignored — it holds a secret):
@@ -107,7 +113,7 @@ Create `services\engine\.env` (git-ignored — it holds a secret):
 ```
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_SERVICE_KEY=sb_secret_…        # Supabase → Settings → API Keys → Secret keys. NOT the publishable key.
-DEVICE_TOKENS={"cam-a":"<token 1>","display-b":"<token 2>"}
+DEVICE_TOKENS={"cam-a":"<token>"}        # the camera only: the display signs in, it holds no token
 ALLOWED_ORIGINS=http://localhost:5173
 ```
 
@@ -205,6 +211,8 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 
 **Events take their site from the device's row.** `/display` filters on site; a token whose device has no row, or no site, is refused before anything is written.
 
+**Nothing is read from a POST until its headers pass.** FastAPI parses a body before the handler runs, so `main.py`'s `RequestGuard` refuses, from the headers alone, a POST with no `X-Device-Token`, no `Content-Length`, or a length over the route's cap (the frame plus a little for `/recognise`, 16 KB for the JSON routes). A store failure answers with a coarse reason; Supabase's own words stay in the engine's log.
+
 **Tokens never enter the bundle.** `vite.config.ts` refuses a production build while `VITE_DEVICE_TOKEN` is set, and CI proves it with a canary. Devices pair from their own screen, one storage key per role.
 
 **One plate in position, or no decision.** The frame is the lane ROI around the stop line. A plate cut by its edge belongs to a car not in position; with a calibrated plate width, a plate much bigger or smaller is a car nearer or further than the stop line. Of what is left there must be exactly one plate — two is no decision, with the reason in the response. M1 took the largest plate, which from behind is the car queued nearest the camera.
@@ -231,7 +239,9 @@ The pure modules carry the tests — on the web side `plates.ts`, `status.ts`, `
 
 Enable it once under **Settings → Pages → Source: GitHub Actions**.
 
-`.github/workflows/ci.yml` runs on every pull request and push to `main`: web typecheck, tests, build and the device-token canary; engine lint and tests against a Postgres 16 service; and the engine **image**, built and run with no network at half a CPU, which must load its model offline and read a real plate inside 400 ms.
+`.github/workflows/ci.yml` runs on every pull request and push to `main`: web typecheck, tests, build and the device-token canary; engine lint and tests against a Postgres 16 service; and the engine **image**, built and run with no network at half a CPU, which must load its model offline and read a real plate inside 400 ms. Both `pnpm audit` and `pip-audit` run there, so a known vulnerability in a locked dependency fails the build; Dependabot (`.github/dependabot.yml`) opens the update. Every action is pinned to a commit.
+
+The production build carries a **Content-Security-Policy** (`vite.config.ts`): only the app's own scripts run, and the page may talk only to its Supabase project and the engine. The `?dev=1` panels are compiled in only while the repository variable `VITE_DEV_PANELS` is `1` (the default, because the gate's set-up below needs them); set it to `0` and re-run the deploy once the camera is set up.
 
 ### The engine on Render (M2)
 
@@ -244,7 +254,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 3. It asks for three values. Copy them from `services/engine/.env` on your laptop:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_KEY` — the **secret** key (`sb_secret_…`)
-   - `DEVICE_TOKENS` — the whole `{"cam-a":"…","display-b":"…"}` line
+   - `DEVICE_TOKENS` — the `{"cam-a":"…"}` line (the camera only)
 4. **Apply.** The first build takes a few minutes. In **Logs**, wait for `ready: plate model loaded, database answered`. If it says `not able to decide frames: db_auth`, the key is wrong; `db_unreachable`, the URL is wrong or the project is paused. `DEVICE_TOKENS is empty` means step 3's third value is missing.
 5. Copy the service URL (`https://vtrack-engine-….onrender.com`). In GitHub: **Settings → Secrets and variables → Actions → Variables → New repository variable** `VITE_ENGINE_URL` = that URL.
 6. **Actions → Deploy web to GitHub Pages → Run workflow.** The URL is compiled into the site, so the site must be rebuilt once it is set.

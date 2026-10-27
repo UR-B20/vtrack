@@ -1,7 +1,8 @@
 # VTrack Engine — one always-on container (CLAUDE.md §3, §7).
 # Render builds this from render.yaml; CI's `docker` job builds and runs the same file with
 # no network at all, which is what proves the model weights are baked in.
-FROM python:3.12-slim
+# Pinned by digest, so a build is the same image every time; Dependabot (docker) moves it.
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 \

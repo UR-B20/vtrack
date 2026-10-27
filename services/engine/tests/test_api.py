@@ -9,6 +9,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from starlette.datastructures import Headers
 
 from tests.conftest import seeded_vehicles
 from tests.memory_store import InMemoryStore
@@ -16,7 +17,7 @@ from tests.stub_alpr import StubALPR
 from vtrack_engine.alpr.base import ALPRError, PlateRead
 from vtrack_engine.config import Settings
 from vtrack_engine.db import StoreError
-from vtrack_engine.main import create_app
+from vtrack_engine.main import create_app, guard_problem
 
 CAM, DISP = "c" * 32, "d" * 32
 DEVICES = {
@@ -120,6 +121,66 @@ class TestRecogniseRefusals:
         rig.alpr.error = ALPRError("Plate Recognizer quota or rate limit reached")
         r = rig.frame("SBA1234G")
         assert r.status_code == 502 and "quota" in r.json()["detail"]
+
+
+# ── Before the body: RequestGuard ──────────────────────────────────────────────────────
+class TestRequestGuard:
+    """FastAPI parses the body before the handler, so these refusals must come from the
+    headers alone (main.py, step 0)."""
+
+    def test_a_declared_body_over_the_cap_is_413_and_nothing_runs(self, rig):
+        big = b"\xff\xd8\xff" + b"\0" * (2 * 1024 * 1024)
+        r = rig.frame("SBA1234G", image=big)
+        assert r.status_code == 413 and "limit" in r.json()["detail"]
+        assert rig.alpr.calls == 0 and rig.events == []
+
+    def test_a_post_without_a_length_is_411(self, rig):
+        r = rig.client.post("/recognise", headers={"X-Device-Token": CAM,
+                                                   "Content-Type": "multipart/form-data; boundary=x"},
+                            content=iter([b"--x--\r\n"]))     # chunked: no Content-Length
+        assert r.status_code == 411
+
+    def test_a_post_with_no_token_header_is_401_before_the_body(self, rig):
+        r = rig.client.post("/manual", json={"plate_text": "SBA1234G"})
+        assert r.status_code == 401 and "X-Device-Token" in r.json()["detail"]
+
+    def test_the_json_routes_have_a_small_cap(self, rig):
+        r = rig.client.post("/heartbeat", headers={"X-Device-Token": CAM},
+                            json={"device_id": "cam-a", "stats": {"pad": "x" * (20 * 1024)}})
+        assert r.status_code == 413
+
+    def test_a_refusal_still_carries_the_cors_headers(self, rig):
+        r = rig.client.post("/manual", headers={"Origin": "http://localhost:5173"},
+                            json={"plate_text": "SBA1234G"})
+        assert r.status_code == 401
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+    @pytest.mark.parametrize(("headers", "status"), [
+        ({}, 401),
+        ({"x-device-token": "t"}, 411),
+        ({"x-device-token": "t", "content-length": "abc"}, 400),
+        ({"x-device-token": "t", "content-length": "17"}, 413),
+        ({"x-device-token": "t", "content-length": "16"}, None),
+    ])
+    def test_guard_problem(self, headers, status):
+        problem = guard_problem(Headers(headers), 16)
+        assert (problem[0] if problem else None) == status
+
+    def test_a_frame_just_over_max_bytes_reaches_the_image_check_not_the_guard(self, rig):
+        # The guard's cap leaves room for the form fields: 401 KiB is images.py's refusal.
+        r = rig.frame("SBA1234G", image=b"\xff\xd8\xff" + b"\0" * (401 * 1024))
+        assert r.status_code == 413 and r.json()["detail"].startswith("image is")
+
+    def test_a_full_size_frame_still_passes(self, rig):
+        import random
+        rnd = random.Random(7)
+        w, h = 960, 540
+        noisy = Image.frombytes("RGB", (w, h), bytes(rnd.getrandbits(8) for _ in range(w * h * 3)))
+        buf = BytesIO()
+        noisy.save(buf, "JPEG", quality=75)
+        big = buf.getvalue()
+        assert 200 * 1024 < len(big) <= 400 * 1024, len(big)       # a real-sized frame
+        assert rig.frame("SBA1234G", image=big).status_code == 200
 
 
 # ── /recognise: decisions ────────────────────────────────────────────────────────────────
@@ -287,6 +348,13 @@ class TestFailedWrites:
         r = rig.frame("SBA1234G")
         assert r.status_code == 504
         assert "decision" not in r.json()                  # /capture must not show a colour
+        # The client gets the coarse reason; Supabase's own words stay in the engine's log.
+        assert r.json()["detail"] == "the engine's database did not answer in time"
+
+    def test_a_store_error_names_no_supabase_detail(self, rig):
+        rig.store.fail_writes = StoreError(400, 'PGRST204 · column "secret_col" of relation "events"')
+        r = rig.frame("SBA1234G")
+        assert r.status_code == 502 and "secret_col" not in r.json()["detail"]
 
 
 # ── /manual ────────────────────────────────────────────────────────────────────────────
@@ -298,6 +366,9 @@ class TestManual:
         body = rig.manual("SBA 1234 G", actor="Sgt Lim").json()
         assert (body["decision"], body["confidence"]) == ("allow", 1.0)
         assert rig.events[0]["source"] == "manual" and rig.events[0]["engine"] == "manual"
+
+    def test_an_overlong_plate_text_is_refused(self, rig):
+        assert rig.manual("S" * 33).status_code == 422
 
     def test_a_bad_check_letter_is_refused_and_named(self, rig):
         r = rig.manual("SBA1234F")

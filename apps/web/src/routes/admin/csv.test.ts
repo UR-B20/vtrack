@@ -180,3 +180,30 @@ describe('the §9 fixtures import cleanly', () => {
     expect(bad.every((r) => r.verdict === 'rejected')).toBe(true)
   })
 })
+
+describe('toVehicleCsv — spreadsheet formulas', () => {
+  const row = (owner_name: string, notes: string | null = null) => ({
+    plate_display: 'SBA 1234 G', owner_name, org_unit: 'HQ Coy', vehicle_type: 'car',
+    pass_type: 'permanent', valid_from: null, valid_until: null, notes,
+  })
+
+  it('neutralises a cell that would run as a formula when the export is opened', () => {
+    const out = toVehicleCsv([row('=HYPERLINK("http://evil","click")', '+1-555'), row('@tan', '-x')])
+    const lines = out.trim().split('\n')
+    expect(lines[1]).toContain(`"'=HYPERLINK(""http://evil"",""click"")"`)
+    expect(lines[1]).toContain(`"'+1-555"`)
+    expect(lines[2]).toContain(`"'@tan"`)
+    expect(lines[2]).toContain(`"'-x"`)
+  })
+
+  it('leaves an ordinary name alone', () => {
+    expect(toVehicleCsv([row('Tan Wei Ming')]).trim().split('\n')[1]).toBe('SBA 1234 G,Tan Wei Ming,HQ Coy,car,permanent,,,')
+  })
+
+  it('still round-trips through the importer (the apostrophe becomes part of the text)', () => {
+    const out = toVehicleCsv([row('=cmd')])
+    const back = parseVehicleCsv(out)
+    expect(back[0]?.verdict).toBe('ok')
+    expect(back[0]?.owner_name).toBe("'=cmd")
+  })
+})
