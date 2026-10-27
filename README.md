@@ -306,7 +306,7 @@ A capture card works the same way (pick it under **CAMERA**): mirror the camera'
 - Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
 - Red **DO NOT ALLOW**: a foreign plate.
 - Press **OK** once you have seen the result: the screen goes back to *Waiting for vehicle*. Without OK it stays 30 s after the last read. The next vehicle always replaces it. **TYPE A PLATE** searches the list by hand.
-- The OFFLINE banner stays off until M3 wires the camera's heartbeats to it. Meanwhile **/admin → Devices** shows when the camera last reported.
+- A grey banner under the top bar says **CAMERA A OFFLINE** when desktop A has not reported for 30 s, **ENGINE OFFLINE** when the engine cannot decide, and **NO CONNECTION** (manual mode) when the phone loses Supabase. The result on screen stays underneath. **/admin → Devices** shows when each device last reported; **/admin → Settings** shows the engine's thresholds.
 
 **Changing a camera's token.** **/admin → Devices → NEW TOKEN** on the camera's row. It makes a new token in your browser, shows it **once**, and saves only its hash: within a few seconds the engine accepts the new token and the old one — whether from Render's `DEVICE_TOKENS` or an earlier one set here — stops working. Then, on the camera, unlock, **UNPAIR**, and pair again with **TYPE THE TOKEN INSTEAD**. Do it when the gate is quiet: until the camera is paired again, vehicles get no result. Use it whenever a token may have been seen by someone else. (`uv run vtrack-pair-qr` only knows the `DEVICE_TOKENS` one, which stops working once a token is set here.)
 

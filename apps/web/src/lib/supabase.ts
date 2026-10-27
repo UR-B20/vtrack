@@ -38,7 +38,3 @@ export const CAMERA_DEVICE_ID = 'cam-a'
  */
 export const ENGINE_URL = (import.meta.env.VITE_ENGINE_URL as string | undefined) || null
 
-/** The OFFLINE banner's heartbeat rule turns on with M3 (§8). /capture sends heartbeats from
- *  M1, but on a laptop the camera page is opened and closed at will, and a banner that trips
- *  whenever that tab is shut would teach the guard to ignore it before it ever matters. */
-export const HEARTBEATS_ENABLED = false

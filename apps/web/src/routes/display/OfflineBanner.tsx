@@ -4,8 +4,10 @@ import { engineLabel, type EngineHealth } from '../../lib/engine'
 
 interface Props {
   cameraOffline: boolean
+  /** The engine's /health fails or says it cannot decide (§6.1). */
+  engineDown: boolean
   realtimeDown: boolean
-  /** Local ms since the camera was last seen, or null when heartbeats do not exist yet. */
+  /** Local ms at which the camera was last seen, or null if it never reported. */
   cameraSince: number | null
   cacheSyncedAt: number | null
   engine: EngineHealth
@@ -19,8 +21,8 @@ interface Props {
  * underneath". A result the guard is acting on must not vanish because a heartbeat
  * was missed.
  */
-export function OfflineBanner({ cameraOffline, realtimeDown, cameraSince, cacheSyncedAt, engine, now }: Props) {
-  if (!cameraOffline && !realtimeDown) return null
+export function OfflineBanner({ cameraOffline, engineDown, realtimeDown, cameraSince, cacheSyncedAt, engine, now }: Props) {
+  if (!cameraOffline && !engineDown && !realtimeDown) return null
 
   const heartbeatAgo = cameraSince === null ? null : Math.round((now - cameraSince) / 1000)
 
@@ -31,6 +33,11 @@ export function OfflineBanner({ cameraOffline, realtimeDown, cameraSince, cacheS
         <>
           <span className="banner__title"><b>NO CONNECTION</b> · manual mode</span>
           <span className="banner__meta">the list below is the last synced copy</span>
+        </>
+      ) : !cameraOffline ? (
+        <>
+          <span className="banner__title"><b>ENGINE OFFLINE</b> · no results until it is back</span>
+          <span className="banner__meta">check vehicles by hand</span>
         </>
       ) : (
         <>

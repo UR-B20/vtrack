@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { CAMERA_DEVICE_ID, ENGINE_URL, HEARTBEATS_ENABLED, SITE, supabase } from '../../lib/supabase'
+import { CAMERA_DEVICE_ID, ENGINE_URL, SITE, supabase } from '../../lib/supabase'
+import { cameraOffline, observe, unknownLiveness, type Liveness } from '../../lib/liveness'
 import { findVehicle, loadVehicles, refreshVehicles, REFRESH_MS, type CachedList } from '../../lib/cache'
 import { isMuted, playDecision, setMuted, unlockAudio } from '../../lib/sounds'
 import { isDevMode } from '../../lib/router'
@@ -47,8 +48,9 @@ export function DisplayRoute() {
   const [cache, setCache] = useState<CachedList>({ rows: [], syncedAt: null, count: 0, syncError: null })
   const [channelReady, setChannelReady] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
-  const [cameraOnline, setCameraOnline] = useState(true)
-  const [cameraSince, setCameraSince] = useState<number | null>(null)
+  // null until the first poll answers, so the banner never flashes on at start-up.
+  const [liveness, setLiveness] = useState<Liveness | null>(null)
+  const [devCameraOff, setDevCameraOff] = useState(false)
   const dev = useMemo(isDevMode, [])
   const engineHealth = useEngineHealth(ENGINE_URL)
 
@@ -122,25 +124,25 @@ export function DisplayRoute() {
     return () => { alive = false; void client.removeChannel(channel) }
   }, [dispatch])
 
-  // ── camera liveness ─────────────────────────────────────────────────────
-  // M0 has no capture node and no engine, so nothing writes devices.last_seen_at. A
-  // staleness rule would therefore pin the OFFLINE banner on over every simulated
-  // state. The poll is written and ready for M3; until heartbeats exist the camera
-  // state comes from the ?dev=1 toggle, which is also how gate-offline.png is reached.
+  // ── camera liveness (§6.1) ───────────────────────────────────────────
+  // /capture reports every 10 s; the engine writes devices.last_seen_at. Staleness is
+  // judged on this phone's clock, from when the value last changed (lib/liveness.ts).
   useEffect(() => {
     const client = supabase
-    if (!HEARTBEATS_ENABLED || !client) return
+    if (!client) return
     let alive = true
+    let first = true
     const poll = async () => {
-      const { data } = await client
+      const { data, error } = await client
         .from('devices_public')
         .select('last_seen_at')
         .eq('id', CAMERA_DEVICE_ID)
         .maybeSingle()
-      if (!alive) return
-      const seen = data?.last_seen_at ? Date.parse(data.last_seen_at as string) : null
-      setCameraSince(seen)
-      setCameraOnline(seen !== null && Date.now() - seen <= 30_000)
+      if (!alive || error) return          // no answer is the NO CONNECTION banner's job
+      const seen = (data?.last_seen_at as string | null | undefined) ?? null
+      const wasFirst = first
+      first = false
+      setLiveness((prev) => observe(prev ?? unknownLiveness, seen, Date.now(), wasFirst))
     }
     void poll()
     const id = setInterval(() => void poll(), HEARTBEAT_POLL_MS)
@@ -148,6 +150,9 @@ export function DisplayRoute() {
   }, [])
 
   // ── derived ─────────────────────────────────────────────────────────────
+  const cameraOnline = !devCameraOff && (liveness === null || !cameraOffline(liveness, now))
+  const cameraSince = liveness?.localSeenAt ?? (liveness?.seen ? Date.parse(liveness.seen) : null)
+  const engineDown = engineHealth.status === 'unreachable' || engineHealth.status === 'not_ready'
   const current = stageEvent(state)
   // A new version of the app waits for standby: never over a vehicle on the stage.
   useApplyUpdateWhenIdle(current === null && !manualOpen)
@@ -219,6 +224,7 @@ export function DisplayRoute() {
       <div className="main">
         <OfflineBanner
           cameraOffline={!cameraOnline}
+          engineDown={engineDown}
           realtimeDown={realtimeDown}
           cameraSince={cameraSince}
           cacheSyncedAt={cache.syncedAt}
@@ -260,12 +266,7 @@ export function DisplayRoute() {
           current={current}
           onLocalEvent={onLocalEvent}
           cameraOnline={cameraOnline}
-          onToggleCamera={() => {
-            setCameraOnline((v) => {
-              if (v) setCameraSince(Date.now() - 31_000)
-              return !v
-            })
-          }}
+          onToggleCamera={() => setDevCameraOff((v) => !v)}
         />
       )}
     </div>

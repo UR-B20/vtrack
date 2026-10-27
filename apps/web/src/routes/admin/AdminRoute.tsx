@@ -8,15 +8,16 @@ import { VehicleDrawer, type VehicleDraft } from './VehicleDrawer'
 import type { importableRows } from './csv'
 import { EventsPage } from './EventsPage'
 import { DevicesPage } from './DevicesPage'
+import { SettingsPage } from './SettingsPage'
 
 type Page = 'vehicles' | 'events' | 'devices' | 'settings'
 
-/** The nav of admin.png. Settings (thresholds, read from /health) is still to come. */
+/** The nav of admin.png. */
 const NAV: { key: Page; label: string; milestone?: string }[] = [
   { key: 'vehicles', label: 'VEHICLES' },
   { key: 'events', label: 'EVENTS' },
   { key: 'devices', label: 'DEVICES' },
-  { key: 'settings', label: 'SETTINGS', milestone: 'M3' },
+  { key: 'settings', label: 'SETTINGS' },
 ]
 
 function isAdmin(session: Session | null): boolean {
@@ -143,6 +144,7 @@ export function AdminRoute() {
         )}
         {page === 'events' && <EventsPage vehicles={vehicles} />}
         {page === 'devices' && <DevicesPage />}
+        {page === 'settings' && <SettingsPage />}
       </main>
 
       {drawer && (
