@@ -39,6 +39,8 @@ export interface Health {
   reason?: HealthReason | null
   uptime_s: number
   version: string
+  /** The decision thresholds the engine runs with — public, shown on /admin → Settings. */
+  thresholds?: Record<string, number>
   // Only with a paired device's token; the public /health is status only (brief §3.10).
   model_error?: string | null
   db_error?: string | null

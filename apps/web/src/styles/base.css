@@ -707,3 +707,7 @@ table.vehicles.events tbody tr, table.vehicles.devices tbody tr { cursor: defaul
 }
 .token-reveal__steps { margin: 0 0 16px; padding-left: 20px; color: var(--ink); line-height: 1.6; }
 .token-reveal__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+table.vehicles.settings tbody tr { cursor: default; }
+table.vehicles.settings th { width: 200px; white-space: nowrap; }
+.settings__env { font-size: 13px; color: var(--muted); }
+.settings__meaning { font-size: 15px; color: var(--muted); }
