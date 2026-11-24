@@ -40,3 +40,9 @@ updates:
   - package-ecosystem: docker
     directory: /services/engine
     schedule: { interval: weekly }
+    # The engine is Python 3.12 (CLAUDE.md §3): a new Python series is a planned change, made
+    # once the ONNX stack ships wheels for it and the slow real-model tests pass on it. Digest
+    # rebuilds of the pinned 3.12 image still arrive, so security patches are not held.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
