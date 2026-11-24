@@ -37,7 +37,7 @@ export function SignIn() {
       email: email.trim(),
       // The emailed link comes back here, not to the project's Site URL. Supabase honours
       // it only if it matches Authentication → URL Configuration → Redirect URLs
-      // (https://ur-b20.github.io/vtrack/**); otherwise it falls back to the Site URL.
+      // (https://r-b-projects.github.io/vtrack/**); otherwise it falls back to the Site URL.
       options: { shouldCreateUser: false, emailRedirectTo: absoluteHref('admin', window.location.origin) },
     })
     setBusy(false)

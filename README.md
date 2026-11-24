@@ -62,7 +62,7 @@ Paste these into the Supabase SQL editor **in order**:
 | 5 | `supabase/migrations/0005_device_tokens.sql` | Lets the admin Devices page set a camera's token (below); without it that page says so. Re-runnable. |
 | 6 | `supabase/migrations/0006_vehicles_for_display.sql` | The display reads the list through a role-checking function, never the base table (so a signed-in phone cannot read `notes` or anything beyond the eight columns on screen). Re-runnable. |
 | 7 | `supabase/seed.sql` | The §9 fixtures + the three `devices` rows. Re-runnable. For a real gate, skip the vehicle rows and load your own list. |
-| 8 | — | **Authentication → URL Configuration**: Site URL `https://ur-b20.github.io/vtrack/admin`, and add `https://ur-b20.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". |
+| 8 | — | **Authentication → URL Configuration**: Site URL `https://r-b-projects.github.io/vtrack/admin`, and add `https://r-b-projects.github.io/vtrack/**` under Redirect URLs (plus `http://localhost:5173/**` for local work). The sign-in email's link returns to `/vtrack/admin` only if it is allowed there; otherwise it lands on the bare origin, "Site not found". |
 | 9 | — | **Authentication → Sign In / Providers**: turn **Allow new users to sign up** OFF (the sign-in form cannot create accounts either). Turn on a CAPTCHA (Attack Protection) if the plan offers it. Then **create the admin's user**: Authentication → Users → **Add user → Create new user**, the admin's email, any password (the OTP sign-in never uses it), tick **Auto Confirm User**. |
 | 10 | `supabase/admin_role.sql` | Replace `you@example.com` (two places), run, then sign in to `/admin` with the emailed code. If you were already signed in, **sign out and back in**. |
 | 11 | — | **Create the display login:** Authentication → Users → **Add user → Create new user**. Any email you control (it is only a login name; no mail is sent), a long random password (20+ characters, from a password manager), and tick **Auto Confirm User**. |
@@ -85,7 +85,7 @@ VITE_LANE=A
 
 The anon key is public by design — it ships in the browser — so since `0004` it may do nothing at all: no reads, no writes. Everything the display sees comes through its own login (role `display`), and the admin console through the admin login. The service key never leaves the engine's host secrets.
 
-> **One origin per site.** `https://ur-b20.github.io` is a single browser origin shared by *every* repository the `ur-b20` account publishes to GitHub Pages, so any other such site could read this app's stored camera token, signed-in sessions and offline list. Until the app has its own custom domain (Settings → Pages → Custom domain; then update `ALLOWED_ORIGINS` on Render and the Supabase URLs above), **no other repository in this account may enable Pages.**
+> **One origin per site.** A browser treats every GitHub Pages site of one account or organisation as a single origin, so any other site published there could read this app's stored camera token, signed-in sessions and offline list. That is why the repository lives in its own organisation, `r-b-projects`, and its site at `https://r-b-projects.github.io/vtrack`: **no other repository in `r-b-projects` may enable Pages.** A custom domain (Settings → Pages → Custom domain; then update `ALLOWED_ORIGINS` on Render and the Supabase URLs above) would lift that rule.
 
 > Supabase's free tier **pauses after 7 idle days**. From M3 the engine's heartbeats keep it awake; until then, check the dashboard before a demo.
 
@@ -252,7 +252,7 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 **Set it up once:**
 
 1. Merge the M2 Stage A pull request (Render deploys `main`).
-2. [render.com](https://render.com) → sign up with GitHub → **New → Blueprint** → pick `UR-B20/vtrack`. Render reads [`render.yaml`](render.yaml).
+2. [render.com](https://render.com) → sign up with GitHub → **New → Blueprint** → pick `r-b-projects/vtrack`. Render reads [`render.yaml`](render.yaml).
 3. It asks for three values. Copy them from `services/engine/.env` on your laptop:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_KEY` — the **secret** key (`sb_secret_…`)
@@ -273,8 +273,8 @@ One always-on container: Render **Starter** (512 MB, half a CPU, about US$7/mont
 **A on a desktop with a USB webcam** — the set-up in use from 26 Oct 2026. Do this first, then steps 5–8 under *A on a phone*.
 1. **The webcam:** a 1080p USB webcam (e.g. Logitech C920s) within 3 m of the stop line, aimed as straight at the plate as possible. Behind the guardhouse glass with a black hood against reflections, or outdoors in an IP65 box with a clear lid, under cover. An active USB extension if the desktop is more than ~1.5 m away.
 2. **Internet:** the desktop shares phone B's mobile data, by USB tethering (steadier) or its hotspot (set "turn off when no devices are connected" to Never). In Windows, set that connection to **Metered**, so updates do not eat the data.
-3. **Windows:** power and screen to **Never** sleep. In Edge, turn **Efficiency mode** off and add `ur-b20.github.io` to **Never put these sites to sleep**.
-4. In Edge, open **https://ur-b20.github.io/vtrack/capture?dev=1** and allow the camera.
+3. **Windows:** power and screen to **Never** sleep. In Edge, turn **Efficiency mode** off and add `r-b-projects.github.io` to **Never put these sites to sleep**.
+4. In Edge, open **https://r-b-projects.github.io/vtrack/capture?dev=1** and allow the camera.
 5. **Pair it** with **TYPE THE TOKEN INSTEAD** (Edge and Chrome on Windows cannot scan the QR code): device `cam-a`, and the token from **/admin → Devices → NEW TOKEN** (*Changing a camera's token*, below), dashes included. Never paste it anywhere else.
 6. **Unlock:** hold the bottom bar with the mouse for 2 s.
 7. In the dev panel, **CAMERA** → pick the webcam if the desktop has more than one camera. The desktop remembers it, and falls back to its default camera if the webcam is unplugged, so check the picture after any restart. The webcam has no zoom: move it, not the box, if the plate is small.
@@ -283,7 +283,7 @@ A capture card works the same way (pick it under **CAMERA**): mirror the camera'
 
 **A on a phone** — the page is designed in portrait.
 1. Turn **auto-rotate off**. Mount the tablet facing the vehicles as they arrive: queued cars then sit further back and look smaller, and motorcycles show their front number sticker.
-2. In Chrome, open **https://ur-b20.github.io/vtrack/capture?dev=1** on mobile data. `?dev=1` shows the setup panel; drop it once set up.
+2. In Chrome, open **https://r-b-projects.github.io/vtrack/capture?dev=1** on mobile data. `?dev=1` shows the setup panel; drop it once set up.
 3. **Pair it.**
    - On the laptop, in `services/engine`, run `uv run vtrack-pair-qr cam-a`. It prints a QR code in the terminal.
    - On the tablet, tap **SCAN PAIRING CODE** and point it at the laptop screen.
@@ -301,7 +301,7 @@ A capture card works the same way (pick it under **CAMERA**): mirror the camera'
    - If a vehicle is missed, lower **PRESENT AT**. If shadows or headlights count as vehicles, raise it.
 9. **Pin the screen** so the page can't be left: Android **Settings → Security → App pinning** (the name varies by model) → on. Then, from Recents, tap Chrome's icon → **Pin**.
 
-**B, a phone in portrait (the guard's screen):** in Chrome, open **https://ur-b20.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. **Sign in once** with the display login (Set up Supabase, steps 9–10); the phone stays signed in. To sign it out, open `/display?dev=1` → **SIGN THIS DISPLAY OUT**, which also deletes the phone's offline copy of the list. Mount it facing the guard, not the lane: the green screen names the owner.
+**B, a phone in portrait (the guard's screen):** in Chrome, open **https://r-b-projects.github.io/vtrack/display**, then **⋮ → Add to Home screen** and start it from there. **Sign in once** with the display login (Set up Supabase, steps 9–10); the phone stays signed in. To sign it out, open `/display?dev=1` → **SIGN THIS DISPLAY OUT**, which also deletes the phone's offline copy of the list. Mount it facing the guard, not the lane: the green screen names the owner.
 - Green **PROCEED**: on the list and valid.
 - Orange **VERIFY MANUALLY**: the guard checks. The line under it says why: not on the list, pass expired or suspended, the camera's read was corrected, or the read was unclear.
 - Red **DO NOT ALLOW**: a foreign plate.
