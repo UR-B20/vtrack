@@ -33,7 +33,7 @@ export function hrefFor(route: Route): string {
 }
 
 /** The full address of a route on this site — what an emailed sign-in link must point at.
- *  On Pages that is https://ur-b20.github.io/vtrack/admin, not the bare origin, which has
+ *  On Pages that is https://r-b-projects.github.io/vtrack/admin, not the bare origin, which has
  *  no site at all ("Site not found"). */
 export function absoluteHref(route: Route, origin: string): string {
   return new URL(hrefFor(route), origin).href

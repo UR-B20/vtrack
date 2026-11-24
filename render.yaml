@@ -26,4 +26,4 @@ services:
       - key: ALPR_ENGINE
         value: local
       - key: ALLOWED_ORIGINS
-        value: https://ur-b20.github.io
+        value: https://r-b-projects.github.io,https://ur-b20.github.io   # the second is the old address: remove once every device has moved (CLAUDE.md §11, Own origin)
