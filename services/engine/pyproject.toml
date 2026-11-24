@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "VTrack Engine: reads a plate, validates it, decides, writes one event (CLAUDE.md §5)."
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi==0.162.0",
+  "fastapi==0.162.2",
   "uvicorn==0.54.0",
-  "pydantic-settings==2.16.1",
+  "pydantic-settings==2.16.2",
   "httpx==0.28.1",
   "pillow==13.0.0",
   "numpy==2.5.4",
   "slowapi==0.1.10",
-  "python-multipart==0.0.32",
+  "python-multipart==0.0.33",
   "fast-alpr[onnx]==0.4.0",
   # fast-alpr 0.4 only floors opencv at 4.9. 5.x was confirmed on 27 Oct 2026 (Dependabot
   # #20): the slow real-model tests and CI's offline image read a real plate on 5.0.0. The cap
@@ -25,10 +25,10 @@ vtrack-pair-qr = "vtrack_engine.pairqr:main"
 
 [dependency-groups]
 dev = [
-  "pytest==9.1.1",
-  "ruff==0.17.2",
+  "pytest==9.2.0",
+  "ruff==0.17.4",
   # Only for tests/test_db_schema.py, which replays the engine's payloads on real Postgres.
-  "psycopg[binary]==3.3.6",
+  "psycopg[binary]==3.3.8",
   "qrcode==8.2",
 ]
 
